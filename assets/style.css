@@ -1,0 +1,27 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 20px;
+}
+
+#controls {
+    display: flex;
+    flex-direction: column;
+    max-width: 300px;
+}
+
+#controls label {
+    margin-top: 10px;
+}
+
+#controls input, #controls select, #controls button {
+    padding: 5px;
+    margin: 5px 0;
+}
+
+#trade-table-container {
+    margin-top: 20px;
+}
+
+h1 {
+    color: #333;
+}
