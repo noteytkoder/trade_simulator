@@ -15,11 +15,15 @@ def save_to_csv(trade_log: List[Dict], metadata: Dict, filename: str):
             for key, value in metadata.items():
                 f.write(f"# {key}: {value}\n")
             f.write("\n")
-            # Записываем логи
+            # Записываем логи с явным указанием всех полей
             if trade_log:
-                writer = csv.DictWriter(f, fieldnames=trade_log[0].keys())
+                fieldnames = ['timestamp', 'type', 'price', 'amount', 'fee', 'balance', 'profit']
+                writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
                 writer.writeheader()
-                writer.writerows(trade_log)
+                for row in trade_log:
+                    # Добавляем пустое значение для 'profit', если его нет
+                    row = {**row, 'profit': row.get('profit', '')}
+                    writer.writerow(row)
             else:
                 logger.warning("trade_log пуст, записываются только метаданные")
         logger.info(f"Сохранено в CSV: {filename}")

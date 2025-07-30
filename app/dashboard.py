@@ -7,6 +7,11 @@ from utils.parser import TableParser
 from trading.simulator import TradeSimulator
 from utils.logger import setup_logger
 import atexit
+import os
+import csv
+from datetime import datetime
+from zoneinfo import ZoneInfo
+import urllib.parse
 
 logger = setup_logger('dashboard')
 
@@ -42,7 +47,6 @@ class TradingDashboard:
         ])
         self.running_intervals = {'5s': False, '1m': False, '1h': False}
         self.setup_routes()
-        # Сохраняем логи при завершении программы
         atexit.register(self.save_all_sessions)
 
     def save_all_sessions(self):
@@ -55,7 +59,8 @@ class TradingDashboard:
     def setup_routes(self):
         self.app.layout = html.Div([
             dcc.Location(id='url', refresh=False),
-            html.Div(id='page-content', className='container mx-auto p-4')
+            html.Div(id='page-content', className='container mx-auto p-4'),
+            dcc.Store(id='running-state', data=self.running_intervals)
         ])
 
         # Основной интерфейс
@@ -85,7 +90,7 @@ class TradingDashboard:
                     html.Button('Старт', id='start-button', n_clicks=0, className='bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600'),
                     html.Button('Стоп', id='stop-button', n_clicks=0, className='bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600'),
                     html.Button('Сброс', id='reset-button', n_clicks=0, className='bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600'),
-                    html.A('Посмотреть логи', href='/logs', className='text-blue-500 hover:underline'),
+                    html.A('Посмотреть логи', href='/logs', target='_blank', className='text-blue-500 hover:underline'),
                     html.Span(id='status-indicator', className='ml-4')
                 ])
             ]),
@@ -99,10 +104,10 @@ class TradingDashboard:
             dcc.Interval(id='poll-interval', interval=1000, disabled=True),
         ])
 
-        # Интерфейс логов
+        # Интерфейс логов (список файлов)
         logs_layout = html.Div([
             html.H1("Логи торговли", className='text-3xl font-bold mb-6 text-center text-gray-800'),
-            html.A('Вернуться к основному интерфейсу', href='/', className='text-blue-500 hover:underline mb-4 inline-block'),
+            html.A('Вернуться к основному интерфейсу', href='/', target='_blank', className='text-blue-500 hover:underline mb-4 inline-block'),
             html.Label("Интервал логов:", className='font-medium mr-2'),
             dcc.Dropdown(
                 id='log-interval-dropdown',
@@ -114,41 +119,56 @@ class TradingDashboard:
                 value='1h',
                 className='w-48 mb-4'
             ),
-            html.Div(id='trade-table-container', className='bg-white p-4 rounded-lg shadow-md'),
+            html.Div(id='file-table-container', className='bg-white p-4 rounded-lg shadow-md mb-4'),
             dcc.Interval(id='log-update-interval', interval=5000, disabled=False),
         ])
 
+        # Интерфейс содержимого файла
+        def file_content_layout(filename):
+            return html.Div([
+                html.H1(f"Содержимое файла: {filename}", className='text-3xl font-bold mb-6 text-center text-gray-800'),
+                html.A('Назад к списку файлов', href='/logs', target='_blank', className='text-blue-500 hover:underline mb-4 inline-block'),
+                html.Div(id='file-content-container', className='bg-white p-4 rounded-lg shadow-md'),
+            ])
+
         @self.app.callback(
             Output('page-content', 'children'),
-            Input('url', 'pathname')
+            [Input('url', 'pathname')],
+            [State('running-state', 'data')]
         )
-        def display_page(pathname):
+        def display_page(pathname, running_state):
+            self.running_intervals = running_state  # Восстанавливаем состояние
             if pathname == '/logs':
                 return logs_layout
+            elif pathname.startswith('/logs/'):
+                filename = urllib.parse.unquote(pathname[len('/logs/'):])
+                return file_content_layout(filename)
             return main_layout
 
         self.register_callbacks()
 
     def register_callbacks(self):
         @self.app.callback(
-            Output('poll-interval', 'disabled'),
-            Output('poll-interval', 'interval'),
-            Output('status-indicator', 'children'),
+            [Output('poll-interval', 'disabled'),
+             Output('poll-interval', 'interval'),
+             Output('status-indicator', 'children'),
+             Output('running-state', 'data')],
             [Input('start-button', 'n_clicks'), Input('stop-button', 'n_clicks')],
-            [State('interval-dropdown', 'value')]
+            [State('interval-dropdown', 'value'), State('running-state', 'data')]
         )
-        def toggle_polling(start_clicks, stop_clicks, interval):
+        def toggle_polling(start_clicks, stop_clicks, interval, running_state):
+            self.running_intervals = running_state
             if start_clicks > stop_clicks:
                 self.running_intervals[interval] = True
                 poll_interval = self.config['poll_intervals'].get(interval, 5) * 1000
                 logger.info(f"Запуск опроса данных для интервала {interval} с частотой {poll_interval} мс")
-                return False, poll_interval, html.Span("🟢 Активно", className='text-green-500 font-bold')
+                return False, poll_interval, html.Span("🟢 Активно", className='text-green-500 font-bold'), self.running_intervals
             else:
                 if self.running_intervals[interval]:
                     self.simulators[interval].save_session()
                     self.running_intervals[interval] = False
                 logger.info(f"Остановка опроса данных для интервала {interval}")
-                return True, 1000, html.Span("🔴 Остановлено", className='text-red-500 font-bold')
+                return True, 1000, html.Span("🔴 Остановлено", className='text-red-500 font-bold'), self.running_intervals
 
         @self.app.callback(
             [Output('btc-amount', 'children'),
@@ -167,8 +187,6 @@ class TradingDashboard:
         def update_dashboard(n_intervals, reset_clicks, start_clicks, interval, balance, entry_threshold, exit_threshold, fee):
             ctx = dash.callback_context
             if ctx.triggered_id in ['reset-button', 'start-button']:
-                if self.running_intervals[interval]:
-                    self.simulators[interval].save_session()
                 self.simulators[interval] = TradeSimulator(
                     balance or self.config['start_balance'],
                     entry_threshold or self.config['entry_threshold'],
@@ -236,49 +254,117 @@ class TradingDashboard:
                 )
 
         @self.app.callback(
-            Output('trade-table-container', 'children'),
+            Output('file-table-container', 'children'),
             [Input('log-update-interval', 'n_intervals'),
-             Input('log-interval-dropdown', 'value')],
-            prevent_initial_call=False
+             Input('log-interval-dropdown', 'value')]
         )
-        def update_trade_logs(n_intervals, interval):
+        def update_file_list(n_intervals, interval):
             try:
-                log_data = self.simulators[interval].get_trade_log()
-                columns = [
-                    {'name': 'Время', 'id': 'timestamp'},
-                    {'name': 'Тип', 'id': 'type'},
-                    {'name': 'Цена', 'id': 'price', 'type': 'numeric', 'format': {'specifier': '.2f'}},
-                    {'name': 'Количество', 'id': 'amount', 'type': 'numeric', 'format': {'specifier': '.6f'}},
-                    {'name': 'Комиссия', 'id': 'fee', 'type': 'numeric', 'format': {'specifier': '.2f'}},
-                    {'name': 'Баланс', 'id': 'balance', 'type': 'numeric', 'format': {'specifier': '.2f'}},
-                    {'name': 'Прибыль', 'id': 'profit', 'type': 'numeric', 'format': {'specifier': '.2f'}}
+                # Получаем список CSV-файлов для выбранного интервала
+                files = [
+                    f for f in os.listdir('simulations')
+                    if f.endswith(f'_{interval}.csv') and os.path.isfile(os.path.join('simulations', f))
                 ]
-                table = dash_table.DataTable(
-                    id='trade-table',
-                    data=log_data,
-                    columns=columns,
+                file_data = [
+                    {
+                        'filename': f,
+                        'created': datetime.fromtimestamp(os.path.getctime(os.path.join('simulations', f)), tz=ZoneInfo("Europe/Moscow")).strftime('%Y-%m-%d %H:%M:%S')
+                    } for f in files
+                ]
+                file_columns = [
+                    {'name': 'Имя файла', 'id': 'filename'},
+                    {'name': 'Время создания', 'id': 'created'}
+                ]
+                file_table = dash_table.DataTable(
+                    id='file-table',
+                    data=file_data,
+                    columns=file_columns,
                     style_table={'overflowX': 'auto'},
                     style_cell={'textAlign': 'left', 'padding': '5px'},
                     style_header={'fontWeight': 'bold', 'backgroundColor': '#f3f4f6'},
                     style_data_conditional=[
                         {
-                            'if': {'column_id': 'profit', 'filter_query': '{profit} > 0'},
-                            'color': 'green'
-                        },
-                        {
-                            'if': {'column_id': 'profit', 'filter_query': '{profit} < 0'},
-                            'color': 'red'
+                            'if': {'column_id': 'filename'},
+                            'textDecoration': 'underline',
+                            'color': '#3B82F6',  # Tailwind blue-500
+                            'cursor': 'pointer'
                         }
                     ],
+                    tooltip_data=[
+                        {
+                            'filename': {'value': f'Кликните для просмотра логов: /logs/{urllib.parse.quote(row["filename"])}', 'type': 'markdown'}
+                        } for row in file_data
+                    ],
+                    tooltip_delay=0,
+                    tooltip_duration=None,
                     sort_action='native',
-                    filter_action='native',
                     page_action='native',
                     page_size=10
                 )
-                return table
+                return file_table
             except Exception as e:
-                logger.error(f"Ошибка отображения логов: {e}")
-                return dash_table.DataTable(data=[], columns=[])
+                logger.error(f"Ошибка отображения списка файлов: {e}")
+                return html.P(f"Ошибка при загрузке списка файлов: {e}", className='text-red-500')
+
+        @self.app.callback(
+            Output('file-content-container', 'children'),
+            [Input('url', 'pathname')]
+        )
+        def update_file_content(pathname):
+            if pathname.startswith('/logs/'):
+                filename = urllib.parse.unquote(pathname[len('/logs/'):])
+                try:
+                    with open(os.path.join('simulations', filename), 'r', encoding='utf-8') as f:
+                        reader = csv.DictReader(f)
+                        log_data = [row for row in reader if row]
+                    columns = [
+                        {'name': 'Время', 'id': 'timestamp'},
+                        {'name': 'Тип', 'id': 'type'},
+                        {'name': 'Цена', 'id': 'price', 'type': 'numeric', 'format': {'specifier': '.2f'}},
+                        {'name': 'Количество', 'id': 'amount', 'type': 'numeric', 'format': {'specifier': '.6f'}},
+                        {'name': 'Комиссия', 'id': 'fee', 'type': 'numeric', 'format': {'specifier': '.2f'}},
+                        {'name': 'Баланс', 'id': 'balance', 'type': 'numeric', 'format': {'specifier': '.2f'}},
+                        {'name': 'Прибыль', 'id': 'profit', 'type': 'numeric', 'format': {'specifier': '.2f'}}
+                    ]
+                    content_table = dash_table.DataTable(
+                        id='trade-table',
+                        data=log_data,
+                        columns=columns,
+                        style_table={'overflowX': 'auto'},
+                        style_cell={'textAlign': 'left', 'padding': '5px'},
+                        style_header={'fontWeight': 'bold', 'backgroundColor': '#f3f4f6'},
+                        style_data_conditional=[
+                            {
+                                'if': {'column_id': 'profit', 'filter_query': '{profit} > 0'},
+                                'color': 'green'
+                            },
+                            {
+                                'if': {'column_id': 'profit', 'filter_query': '{profit} < 0'},
+                                'color': 'red'
+                            }
+                        ],
+                        sort_action='native',
+                        filter_action='native',
+                        page_action='native',
+                        page_size=10
+                    )
+                    return content_table
+                except Exception as e:
+                    logger.error(f"Ошибка чтения файла {filename}: {e}")
+                    return html.P(f"Ошибка при чтении файла: {e}", className='text-red-500')
+            return html.Div()
+
+        @self.app.callback(
+            Output('url', 'href'),
+            [Input('file-table', 'active_cell')],
+            [State('file-table', 'data')]
+        )
+        def navigate_to_file(active_cell, file_data):
+            if active_cell and file_data:
+                row_index = active_cell['row']
+                filename = file_data[row_index]['filename']
+                return f"/logs/{urllib.parse.quote(filename)}"
+            raise dash.exceptions.PreventUpdate
 
     def run(self):
         """Запускает сервер Dash"""
