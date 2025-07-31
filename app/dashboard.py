@@ -56,6 +56,22 @@ class TradingDashboard:
                 simulator.save_session()
                 logger.info(f"Сохранена сессия для интервала {interval} при завершении")
 
+    def update_config(self, key: str, value: any):
+        """Обновляет значение в config.yaml"""
+        try:
+            with open('config.yaml', 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+            keys = key.split('.')
+            current = config
+            for k in keys[:-1]:
+                current = current.setdefault(k, {})
+            current[keys[-1]] = value
+            with open('config.yaml', 'w', encoding='utf-8') as f:
+                yaml.safe_dump(config, f, allow_unicode=True)
+            logger.info(f"Обновлён конфиг: {key} = {value}")
+        except Exception as e:
+            logger.error(f"Ошибка обновления конфига: {e}")
+
     def setup_routes(self):
         self.app.layout = html.Div([
             dcc.Location(id='url', refresh=False),
@@ -84,13 +100,12 @@ class TradingDashboard:
                             {'label': '1 минута', 'value': '1m'},
                             {'label': '1 час', 'value': '1h'}
                         ],
-                        value='1h',
+                        value=self.config.get('ui', {}).get('default_interval', '1m'),
                         className='w-48'
                     ),
                     html.Button('Старт', id='start-button', n_clicks=0, className='bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600'),
                     html.Button('Стоп', id='stop-button', n_clicks=0, className='bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600'),
-                    html.Button('Сброс', id='reset-button', n_clicks=0, className='bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600'),
-                    html.A('Посмотреть логи', href='/logs', target='_blank', className='text-blue-500 hover:underline'),
+                    #html.A('Посмотреть логи', href='/logs', className='text-blue-500 hover:underline'),
                     html.Span(id='status-indicator', className='ml-4')
                 ])
             ]),
@@ -107,7 +122,7 @@ class TradingDashboard:
         # Интерфейс логов (список файлов)
         logs_layout = html.Div([
             html.H1("Логи торговли", className='text-3xl font-bold mb-6 text-center text-gray-800'),
-            html.A('Вернуться к основному интерфейсу', href='/', target='_blank', className='text-blue-500 hover:underline mb-4 inline-block'),
+            #html.A('Вернуться к основному интерфейсу', href='/', className='text-blue-500 hover:underline mb-4 inline-block'),
             html.Label("Интервал логов:", className='font-medium mr-2'),
             dcc.Dropdown(
                 id='log-interval-dropdown',
@@ -116,14 +131,14 @@ class TradingDashboard:
                     {'label': '1 минута', 'value': '1m'},
                     {'label': '1 час', 'value': '1h'}
                 ],
-                value='1h',
+                value=self.config.get('ui', {}).get('logs_interval', '5s'),
                 className='w-48 mb-4'
             ),
             html.Label("Записей на странице:", className='font-medium mr-2'),
             dcc.Dropdown(
                 id='page-size-dropdown',
                 options=[{'label': str(i), 'value': i} for i in [10, 25, 50, 100]],
-                value=10,
+                value=self.config.get('ui', {}).get('logs_page_size', 25),
                 className='w-32 mb-4'
             ),
             html.Div(id='file-table-container', className='bg-white p-4 rounded-lg shadow-md mb-4'),
@@ -134,12 +149,12 @@ class TradingDashboard:
         def file_content_layout(filename):
             return html.Div([
                 html.H1(f"Содержимое файла: {filename}", className='text-3xl font-bold mb-6 text-center text-gray-800'),
-                html.A('Назад к списку файлов', href='/logs', target='_blank', className='text-blue-500 hover:underline mb-4 inline-block'),
-                html.Label("Записей на странице:", className='font-medium mr-2'),
+                html.A('Назад к списку файлов', href='/logs', className='text-blue-500 hover:underline mb-4 inline-block'),
+                #html.Label("Записей на странице:", className='font-medium mr-2'),
                 dcc.Dropdown(
                     id='page-size-dropdown',
                     options=[{'label': str(i), 'value': i} for i in [10, 25, 50, 100]],
-                    value=10,
+                    value=self.config.get('ui', {}).get('logs_page_size', 25),
                     className='w-32 mb-4'
                 ),
                 html.Div(id='file-content-container', className='bg-white p-4 rounded-lg shadow-md'),
@@ -190,7 +205,6 @@ class TradingDashboard:
              Output('total-profit', 'children'),
              Output('balance-graph', 'figure')],
             [Input('poll-interval', 'n_intervals'),
-             Input('reset-button', 'n_clicks'),
              Input('start-button', 'n_clicks')],
             [State('interval-dropdown', 'value'),
              State('balance-input', 'value'),
@@ -198,9 +212,9 @@ class TradingDashboard:
              State('exit-threshold-input', 'value'),
              State('fee-input', 'value')]
         )
-        def update_dashboard(n_intervals, reset_clicks, start_clicks, interval, balance, entry_threshold, exit_threshold, fee):
+        def update_dashboard(n_intervals, start_clicks, interval, balance, entry_threshold, exit_threshold, fee):
             ctx = dash.callback_context
-            if ctx.triggered_id in ['reset-button', 'start-button']:
+            if ctx.triggered_id == 'start-button':
                 self.simulators[interval] = TradeSimulator(
                     balance or self.config['start_balance'],
                     entry_threshold or self.config['entry_threshold'],
@@ -208,7 +222,7 @@ class TradingDashboard:
                     fee or self.config['fee_pct'],
                     interval
                 )
-                logger.info(f"Сброс/запуск симулятора для интервала {interval}")
+                logger.info(f"Запуск симулятора для интервала {interval}")
 
             if n_intervals is None or not self.running_intervals[interval]:
                 return (
@@ -383,6 +397,25 @@ class TradingDashboard:
                 filename = file_data[row_index]['filename']
                 return f"/logs/{urllib.parse.quote(filename)}"
             return no_update
+
+        @self.app.callback(
+            Output('dummy-output', 'children'),
+            [Input('interval-dropdown', 'value'),
+             Input('log-interval-dropdown', 'value'),
+             Input('page-size-dropdown', 'value')]
+        )
+        def update_config_values(main_interval, logs_interval, page_size):
+            ctx = dash.callback_context
+            if not ctx.triggered:
+                return ""
+            triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+            if triggered_id == 'interval-dropdown' and main_interval:
+                self.update_config('ui.default_interval', main_interval)
+            elif triggered_id == 'log-interval-dropdown' and logs_interval:
+                self.update_config('ui.logs_interval', logs_interval)
+            elif triggered_id == 'page-size-dropdown' and page_size:
+                self.update_config('ui.logs_page_size', page_size)
+            return ""
 
     def run(self):
         """Запускает сервер Dash"""

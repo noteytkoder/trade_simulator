@@ -19,3 +19,9 @@ endpoints:
 auth:
   username: admin
   password: qwerty63
+
+# интерфейс
+ui:
+  default_interval: "1m"
+  logs_interval: "5s"
+  logs_page_size: 25
