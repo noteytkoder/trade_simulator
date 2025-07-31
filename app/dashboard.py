@@ -284,26 +284,50 @@ class TradingDashboard:
         @self.app.callback(
             Output('file-table-container', 'children'),
             [Input('log-update-interval', 'n_intervals'),
-             Input('log-interval-dropdown', 'value'),
-             Input('page-size-dropdown', 'value')]
+            Input('log-interval-dropdown', 'value'),
+            Input('page-size-dropdown', 'value')]
         )
         def update_file_list(n_intervals, interval, page_size):
+            def read_metadata(file_path):
+                metadata = {}
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if line.startswith('#'):
+                            parts = line[1:].strip().split(':', 1)
+                            if len(parts) == 2:
+                                key, value = parts
+                                metadata[key.strip()] = value.strip()
+                        elif line.strip() == '':
+                            break
+                return metadata
+
             try:
-                # Получаем список CSV-файлов для выбранного интервала
                 files = [
                     f for f in os.listdir('simulations')
                     if f.endswith(f'_{interval}.csv') and os.path.isfile(os.path.join('simulations', f))
                 ]
-                file_data = [
-                    {
+                file_data = []
+                for f in files:
+                    path = os.path.join('simulations', f)
+                    meta = read_metadata(path)
+                    file_data.append({
                         'filename': f,
-                        'created': datetime.fromtimestamp(os.path.getctime(os.path.join('simulations', f)), tz=ZoneInfo("Europe/Moscow")).strftime('%Y-%m-%d %H:%M:%S')
-                    } for f in files
-                ]
+                        'created': datetime.fromtimestamp(os.path.getctime(path), tz=ZoneInfo("Europe/Moscow")).strftime('%Y-%m-%d %H:%M:%S'),
+                        'interval': meta.get('interval', ''),
+                        'balance': meta.get('start_balance', ''),
+                        'thresholds': f"{meta.get('entry_threshold', '')} / {meta.get('exit_threshold', '')}",
+                        'fee': meta.get('fee_pct', '')
+                    })
+
                 file_columns = [
                     {'name': 'Имя файла', 'id': 'filename'},
-                    {'name': 'Время создания', 'id': 'created'}
+                    {'name': 'Создано', 'id': 'created'},
+                    {'name': 'Интервал', 'id': 'interval'},
+                    {'name': 'Баланс', 'id': 'balance'},
+                    {'name': 'Пороги', 'id': 'thresholds'},
+                    {'name': 'Комиссия', 'id': 'fee'}
                 ]
+
                 file_table = dash_table.DataTable(
                     id='file-table',
                     data=file_data,
@@ -315,7 +339,7 @@ class TradingDashboard:
                         {
                             'if': {'column_id': 'filename'},
                             'textDecoration': 'underline',
-                            'color': '#3B82F6',  # Tailwind blue-500
+                            'color': '#3B82F6',
                             'cursor': 'pointer'
                         }
                     ],
@@ -335,20 +359,43 @@ class TradingDashboard:
                 logger.error(f"Ошибка отображения списка файлов: {e}")
                 return html.P(f"Ошибка при загрузке списка файлов: {e}", className='text-red-500')
 
+
         @self.app.callback(
             Output('file-content-container', 'children'),
             [Input('url', 'pathname'),
-             Input('page-size-dropdown', 'value')]
+            Input('page-size-dropdown', 'value')]
         )
         def update_file_content(pathname, page_size):
             if pathname.startswith('/logs/'):
                 filename = urllib.parse.unquote(pathname[len('/logs/'):])
+                filepath = os.path.join('simulations', filename)
                 try:
-                    with open(os.path.join('simulations', filename), 'r', encoding='utf-8') as f:
-                        # Пропускаем строки-комментарии, начинающиеся с '#'
-                        lines = [line for line in f if not line.startswith('#') and line.strip()]
-                        reader = csv.DictReader(lines)
-                        log_data = [row for row in reader if row]
+                    # Чтение метаданных
+                    metadata = {}
+                    lines_for_table = []
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            if line.startswith('#'):
+                                key_value = line[1:].strip().split(':', 1)
+                                if len(key_value) == 2:
+                                    key, value = key_value
+                                    metadata[key.strip()] = value.strip()
+                            elif line.strip() == "":
+                                break
+                        # теперь пропускаем комментарии и пустые строки
+                        lines_for_table = [line for line in f if not line.startswith('#') and line.strip()]
+
+                    reader = csv.DictReader(lines_for_table)
+                    log_data = [row for row in reader if row]
+
+                    # Таблица метаданных
+                    meta_table = html.Table([
+                        html.Tr([html.Th("Параметр"), html.Th("Значение")])
+                    ] + [
+                        html.Tr([html.Td(k), html.Td(v)]) for k, v in metadata.items()
+                    ], className='table-auto mb-4 border-collapse border border-gray-300')
+
+                    # Таблица сделок
                     columns = [
                         {'name': 'Время', 'id': 'timestamp'},
                         {'name': 'Тип', 'id': 'type'},
@@ -358,6 +405,7 @@ class TradingDashboard:
                         {'name': 'Баланс', 'id': 'balance', 'type': 'numeric', 'format': {'specifier': '.2f'}},
                         {'name': 'Прибыль', 'id': 'profit', 'type': 'numeric', 'format': {'specifier': '.2f'}}
                     ]
+
                     content_table = dash_table.DataTable(
                         id='trade-table',
                         data=log_data,
@@ -366,25 +414,28 @@ class TradingDashboard:
                         style_cell={'textAlign': 'left', 'padding': '5px'},
                         style_header={'fontWeight': 'bold', 'backgroundColor': '#f3f4f6'},
                         style_data_conditional=[
-                            {
-                                'if': {'column_id': 'profit', 'filter_query': '{profit} > 0'},
-                                'color': 'green'
-                            },
-                            {
-                                'if': {'column_id': 'profit', 'filter_query': '{profit} < 0'},
-                                'color': 'red'
-                            }
+                            {'if': {'column_id': 'profit', 'filter_query': '{profit} > 0'}, 'color': 'green'},
+                            {'if': {'column_id': 'profit', 'filter_query': '{profit} < 0'}, 'color': 'red'}
                         ],
                         sort_action='native',
                         filter_action='native',
                         page_action='native',
                         page_size=page_size
                     )
-                    return content_table
+
+                    return html.Div([
+                        html.H4("Параметры сессии", className="text-xl font-semibold mb-2"),
+                        meta_table,
+                        html.H4("История сделок", className="text-xl font-semibold mb-2 mt-4"),
+                        content_table
+                    ])
+
                 except Exception as e:
                     logger.error(f"Ошибка чтения файла {filename}: {e}")
                     return html.P(f"Ошибка при чтении файла: {e}", className='text-red-500')
+
             return html.Div()
+
 
         @self.app.callback(
             Output('url', 'pathname'),
