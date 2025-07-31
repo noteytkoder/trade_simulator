@@ -1,6 +1,6 @@
 import yaml
 import dash
-from dash import Dash, html, dcc, dash_table
+from dash import Dash, html, dcc, dash_table, no_update
 from dash.dependencies import Input, Output, State
 from typing import Dict, List
 from utils.parser import TableParser
@@ -119,6 +119,13 @@ class TradingDashboard:
                 value='1h',
                 className='w-48 mb-4'
             ),
+            html.Label("Записей на странице:", className='font-medium mr-2'),
+            dcc.Dropdown(
+                id='page-size-dropdown',
+                options=[{'label': str(i), 'value': i} for i in [10, 25, 50, 100]],
+                value=10,
+                className='w-32 mb-4'
+            ),
             html.Div(id='file-table-container', className='bg-white p-4 rounded-lg shadow-md mb-4'),
             dcc.Interval(id='log-update-interval', interval=5000, disabled=False),
         ])
@@ -128,6 +135,13 @@ class TradingDashboard:
             return html.Div([
                 html.H1(f"Содержимое файла: {filename}", className='text-3xl font-bold mb-6 text-center text-gray-800'),
                 html.A('Назад к списку файлов', href='/logs', target='_blank', className='text-blue-500 hover:underline mb-4 inline-block'),
+                html.Label("Записей на странице:", className='font-medium mr-2'),
+                dcc.Dropdown(
+                    id='page-size-dropdown',
+                    options=[{'label': str(i), 'value': i} for i in [10, 25, 50, 100]],
+                    value=10,
+                    className='w-32 mb-4'
+                ),
                 html.Div(id='file-content-container', className='bg-white p-4 rounded-lg shadow-md'),
             ])
 
@@ -256,9 +270,10 @@ class TradingDashboard:
         @self.app.callback(
             Output('file-table-container', 'children'),
             [Input('log-update-interval', 'n_intervals'),
-             Input('log-interval-dropdown', 'value')]
+             Input('log-interval-dropdown', 'value'),
+             Input('page-size-dropdown', 'value')]
         )
-        def update_file_list(n_intervals, interval):
+        def update_file_list(n_intervals, interval, page_size):
             try:
                 # Получаем список CSV-файлов для выбранного интервала
                 files = [
@@ -299,7 +314,7 @@ class TradingDashboard:
                     tooltip_duration=None,
                     sort_action='native',
                     page_action='native',
-                    page_size=10
+                    page_size=page_size
                 )
                 return file_table
             except Exception as e:
@@ -308,14 +323,17 @@ class TradingDashboard:
 
         @self.app.callback(
             Output('file-content-container', 'children'),
-            [Input('url', 'pathname')]
+            [Input('url', 'pathname'),
+             Input('page-size-dropdown', 'value')]
         )
-        def update_file_content(pathname):
+        def update_file_content(pathname, page_size):
             if pathname.startswith('/logs/'):
                 filename = urllib.parse.unquote(pathname[len('/logs/'):])
                 try:
                     with open(os.path.join('simulations', filename), 'r', encoding='utf-8') as f:
-                        reader = csv.DictReader(f)
+                        # Пропускаем строки-комментарии, начинающиеся с '#'
+                        lines = [line for line in f if not line.startswith('#') and line.strip()]
+                        reader = csv.DictReader(lines)
                         log_data = [row for row in reader if row]
                     columns = [
                         {'name': 'Время', 'id': 'timestamp'},
@@ -346,7 +364,7 @@ class TradingDashboard:
                         sort_action='native',
                         filter_action='native',
                         page_action='native',
-                        page_size=10
+                        page_size=page_size
                     )
                     return content_table
                 except Exception as e:
@@ -355,7 +373,7 @@ class TradingDashboard:
             return html.Div()
 
         @self.app.callback(
-            Output('url', 'href'),
+            Output('url', 'pathname'),
             [Input('file-table', 'active_cell')],
             [State('file-table', 'data')]
         )
@@ -364,7 +382,7 @@ class TradingDashboard:
                 row_index = active_cell['row']
                 filename = file_data[row_index]['filename']
                 return f"/logs/{urllib.parse.quote(filename)}"
-            raise dash.exceptions.PreventUpdate
+            return no_update
 
     def run(self):
         """Запускает сервер Dash"""
