@@ -2,46 +2,20 @@ import yaml
 import dash
 from dash import Dash, html, dcc
 from dash.dependencies import Input, Output, State
-from trading.simulator import TradeSimulator
-from utils.parser import TableParser
+from apps.simulation_app.simulation_manager import SimulationManager
 from utils.logger import setup_logger
-import atexit
 
 logger = setup_logger('simulation_dashboard')
 
 class TradingDashboard:
     def __init__(self):
         self.config = yaml.safe_load(open('config.yaml', 'r'))
-        self.auth = (self.config['auth']['username'], self.config['auth']['password'])
-        self.simulators = {}
+        self.manager = SimulationManager()
         self.app = Dash(__name__, external_stylesheets=[
             'https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css'
-        ], suppress_callback_exceptions=True)  # Добавляем suppress_callback_exceptions
-        self.running_intervals = {'5s': False, '1m': False, '1h': False}
+        ], suppress_callback_exceptions=True)
         self.setup_layout()
         self.register_callbacks()
-        atexit.register(self.save_all_sessions)
-
-    def save_all_sessions(self):
-        for interval, simulator in self.simulators.items():
-            if self.running_intervals[interval]:
-                simulator.save_session()
-                logger.info(f"Сохранена сессия для интервала {interval} при завершении")
-
-    def update_config(self, key: str, value: any):
-        try:
-            with open('config.yaml', 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
-            keys = key.split('.')
-            current = config
-            for k in keys[:-1]:
-                current = current.setdefault(k, {})
-            current[keys[-1]] = value
-            with open('config.yaml', 'w', encoding='utf-8') as f:
-                yaml.safe_dump(config, f, allow_unicode=True)
-            logger.info(f"Обновлён конфиг: {key} = {value}")
-        except Exception as e:
-            logger.error(f"Ошибка обновления конфига: {e}")
 
     def setup_layout(self):
         self.app.layout = html.Div([
@@ -79,138 +53,75 @@ class TradingDashboard:
                 html.P(id='total-profit', children="Прибыль: 0.0 USDT", className='text-gray-700'),
             ]),
             dcc.Graph(id='balance-graph', config={'displayModeBar': True, 'scrollZoom': True}),
-            dcc.Interval(id='poll-interval', interval=1000, disabled=True),
-            dcc.Store(id='running-state', data=self.running_intervals)
+            dcc.Interval(id='poll-interval', interval=2000, disabled=False)
         ])
 
     def register_callbacks(self):
         @self.app.callback(
-            [Output('poll-interval', 'disabled'),
-             Output('poll-interval', 'interval'),
-             Output('status-indicator', 'children'),
-             Output('running-state', 'data')],
+            Output('status-indicator', 'children'),
             [Input('start-button', 'n_clicks'), Input('stop-button', 'n_clicks')],
-            [State('interval-dropdown', 'value'), State('running-state', 'data'),
-             State('balance-input', 'value'), State('entry-threshold-input', 'value'),
-             State('exit-threshold-input', 'value'), State('fee-input', 'value')]
+            [State('interval-dropdown', 'value'), State('balance-input', 'value'),
+             State('entry-threshold-input', 'value'), State('exit-threshold-input', 'value'),
+             State('fee-input', 'value')]
         )
-        def toggle_polling(start_clicks, stop_clicks, interval, running_state, balance, entry_threshold, exit_threshold, fee):
-            self.running_intervals = running_state
-            if start_clicks > stop_clicks:
-                if interval not in self.simulators:
-                    self.simulators[interval] = TradeSimulator(
-                        balance or self.config['start_balance'],
-                        entry_threshold or self.config['entry_threshold'],
-                        exit_threshold or self.config['exit_threshold'],
-                        fee or self.config['fee_pct'],
-                        interval
-                    )
-                    logger.info(f"Инициализация симулятора ({interval}): баланс={balance or self.config['start_balance']}, "
-                               f"entry={entry_threshold or self.config['entry_threshold']}%, "
-                               f"exit={exit_threshold or self.config['exit_threshold']}%, fee={fee or self.config['fee_pct']}%")
-                self.running_intervals[interval] = True
-                poll_interval = self.config['poll_intervals'].get(interval, 5) * 1000
-                logger.info(f"Запуск опроса данных для интервала {interval} с частотой {poll_interval} мс")
-                return False, poll_interval, html.Span("🟢 Активно", className='text-green-500 font-bold'), self.running_intervals
-            else:
-                self.running_intervals[interval] = False
-                logger.info(f"Остановка опроса данных для интервала {interval}")
-                if interval in self.simulators:
-                    self.simulators[interval].save_session()
-                    del self.simulators[interval]  # Удаляем симулятор при остановке
-                return True, 1000, html.Span("🔴 Остановлено", className='text-red-500 font-bold'), self.running_intervals
+        def control_simulation(start_clicks, stop_clicks, interval, balance, entry, exit_t, fee):
+            ctx = dash.callback_context
+            trigger = ctx.triggered_id if ctx.triggered_id else None
+
+            # При загрузке страницы проверяем статус
+            if trigger is None:
+                sim_info = self.manager.simulations.get(interval)
+                if sim_info and sim_info.get("running"):
+                    return html.Span("🟢 Активно", className='text-green-500 font-bold')
+                return html.Span("⚪ Ожидание", className='text-gray-500 font-bold')
+
+            if trigger == "start-button":
+                self.manager.start_simulation(interval, balance, entry, exit_t, fee)
+                return html.Span("🟢 Активно", className='text-green-500 font-bold')
+
+            if trigger == "stop-button":
+                self.manager.stop_simulation(interval)
+                return html.Span("🔴 Остановлено", className='text-red-500 font-bold')
+
+            return html.Span("⚪ Ожидание", className='text-gray-500 font-bold')
+
 
         @self.app.callback(
             [Output('btc-amount', 'children'),
              Output('current-balance', 'children'),
              Output('total-profit', 'children'),
              Output('balance-graph', 'figure')],
-            [Input('poll-interval', 'n_intervals'),
-             Input('start-button', 'n_clicks')],
-            [State('interval-dropdown', 'value'),
-             State('balance-input', 'value'),
-             State('entry-threshold-input', 'value'),
-             State('exit-threshold-input', 'value'),
-             State('fee-input', 'value')]
+            [Input('poll-interval', 'n_intervals')],
+            [State('interval-dropdown', 'value')]
         )
-        def update_dashboard(n_intervals, start_clicks, interval, balance, entry_threshold, exit_threshold, fee):
-            ctx = dash.callback_context
-            if ctx.triggered_id == 'start-button':
-                if interval not in self.simulators:
-                    self.simulators[interval] = TradeSimulator(
-                        balance or self.config['start_balance'],
-                        entry_threshold or self.config['entry_threshold'],
-                        exit_threshold or self.config['exit_threshold'],
-                        fee or self.config['fee_pct'],
-                        interval
-                    )
-                    logger.info(f"Запуск симулятора для интервала {interval}")
+        def update_dashboard(n_intervals, interval):
+            sim = self.manager.get_simulator(interval)
+            if not sim:
+                return "BTC: 0.0", "Баланс: 0.0 USDT", "Прибыль: 0.0 USDT", {'data': [], 'layout': {'title': 'Нет данных'}}
 
-            if n_intervals is None or not self.running_intervals[interval] or interval not in self.simulators:
-                return (
-                    f"BTC: {0:.8f}",
-                    f"Баланс: {0:.2f} USDT",
-                    f"Прибыль: {0:.2f} USDT",
-                    {'data': [], 'layout': {'title': f'Баланс ({interval})', 'xaxis': {'title': 'Время'}, 'yaxis': {'title': 'Баланс (USDT)'}}}
-                )
-
-            try:
-                endpoint = self.config['endpoints']['five_sec'] if interval == '5s' else self.config['endpoints']['minute_hour']
-                html_content = TableParser.fetch(endpoint, self.auth)
-                tick = TableParser.parse(html_content, interval)
-                logger.debug(f"Получен tick: {tick}")
-                self.simulators[interval].process_tick(tick)
-
-                balance_series = self.simulators[interval].get_balance_series()
-                logger.debug(f"Обновление balance_series: {balance_series}")
-                figure = {
-                    'data': [
-                        {
-                            'x': [t[0] for t in balance_series],
-                            'y': [t[1] for t in balance_series],
-                            'type': 'line',
-                            'name': 'Баланс',
-                            'line': {'color': '#1f77b4'}
-                        },
-                        {
-                            'x': [t[0] for t in balance_series],
-                            'y': [sum(log.get('profit', 0) for log in self.simulators[interval].get_trade_log()[:i+1]) for i in range(len(balance_series))],
-                            'type': 'line',
-                            'name': 'Прибыль',
-                            'line': {'color': '#ff7f0e', 'dash': 'dash'}
-                        }
-                    ],
-                    'layout': {
-                        'title': f'Баланс и прибыль ({interval})',
-                        'xaxis': {'title': 'Время', 'tickangle': 45},
-                        'yaxis': {'title': 'USDT'},
-                        'showlegend': True,
-                        'margin': {'b': 150}
+            balance_series = sim.get_balance_series()
+            figure = {
+                'data': [
+                    {
+                        'x': [t[0] for t in balance_series],
+                        'y': [t[1] for t in balance_series],
+                        'type': 'line',
+                        'name': 'Баланс',
+                        'line': {'color': '#1f77b4'}
                     }
+                ],
+                'layout': {
+                    'title': f'Баланс ({interval})',
+                    'xaxis': {'title': 'Время'},
+                    'yaxis': {'title': 'USDT'}
                 }
-                return (
-                    f"BTC: {self.simulators[interval].get_current_btc():.6f}",
-                    f"Баланс: {self.simulators[interval].get_current_balance():.2f} USDT",
-                    f"Прибыль: {self.simulators[interval].get_total_profit():.2f} USDT",
-                    figure
-                )
-            except Exception as e:
-                logger.error(f"Ошибка обновления дашборда: {e}")
-                return (
-                    f"BTC: {self.simulators[interval].get_current_btc():.6f}",
-                    f"Баланс: {self.simulators[interval].get_current_balance():.2f} USDT",
-                    f"Прибыль: {self.simulators[interval].get_total_profit():.2f} USDT",
-                    {'data': [], 'layout': {'title': f'Баланс ({interval})', 'xaxis': {'title': 'Время'}, 'yaxis': {'title': 'Баланс (USDT)'}}}
-                )
-
-        @self.app.callback(
-            Output('dummy-output', 'children'),
-            [Input('interval-dropdown', 'value')]
-        )
-        def update_config_values(main_interval):
-            if main_interval:
-                self.update_config('ui.default_interval', main_interval)
-            return ""
+            }
+            return (
+                f"BTC: {sim.get_current_btc():.6f}",
+                f"Баланс: {sim.get_current_balance():.2f} USDT",
+                f"Прибыль: {sim.get_total_profit():.2f} USDT",
+                figure
+            )
 
     def run(self, port=8050):
         self.app.run(host='0.0.0.0', port=port, debug=False)
