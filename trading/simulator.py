@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import List, Dict, Tuple
 from utils.logger import setup_logger
 from utils.csv_writer import save_to_csv
-from zoneinfo import ZoneInfo
+from backports.zoneinfo import ZoneInfo
 import os
 
 logger = setup_logger('simulator')
@@ -115,5 +115,7 @@ class TradeSimulator:
     def save_session(self):
         if not self.trade_log:
             return
+        # Создаём папку simulations, если её нет
+        os.makedirs("simulations", exist_ok=True)
         filename = f"simulations/simulation_{self.start_time}_{self.interval}.csv"
         save_to_csv(self.trade_log, self.metadata, filename)

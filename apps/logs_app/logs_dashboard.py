@@ -6,7 +6,7 @@ from utils.logger import setup_logger
 import os
 import csv
 from datetime import datetime
-from zoneinfo import ZoneInfo
+from backports.zoneinfo import ZoneInfo
 import urllib.parse
 import tempfile
 import shutil
