@@ -13,32 +13,10 @@ class TradingDashboard:
     def __init__(self):
         self.config = yaml.safe_load(open('config.yaml', 'r'))
         self.auth = (self.config['auth']['username'], self.config['auth']['password'])
-        self.simulators = {
-            '5s': TradeSimulator(
-                self.config['start_balance'],
-                self.config['entry_threshold'],
-                self.config['exit_threshold'],
-                self.config['fee_pct'],
-                '5s'
-            ),
-            '1m': TradeSimulator(
-                self.config['start_balance'],
-                self.config['entry_threshold'],
-                self.config['exit_threshold'],
-                self.config['fee_pct'],
-                '1m'
-            ),
-            '1h': TradeSimulator(
-                self.config['start_balance'],
-                self.config['entry_threshold'],
-                self.config['exit_threshold'],
-                self.config['fee_pct'],
-                '1h'
-            )
-        }
+        self.simulators = {}
         self.app = Dash(__name__, external_stylesheets=[
             'https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css'
-        ])
+        ], suppress_callback_exceptions=True)  # Добавляем suppress_callback_exceptions
         self.running_intervals = {'5s': False, '1m': False, '1h': False}
         self.setup_layout()
         self.register_callbacks()
@@ -112,19 +90,24 @@ class TradingDashboard:
              Output('status-indicator', 'children'),
              Output('running-state', 'data')],
             [Input('start-button', 'n_clicks'), Input('stop-button', 'n_clicks')],
-            [State('interval-dropdown', 'value'), State('running-state', 'data')]
+            [State('interval-dropdown', 'value'), State('running-state', 'data'),
+             State('balance-input', 'value'), State('entry-threshold-input', 'value'),
+             State('exit-threshold-input', 'value'), State('fee-input', 'value')]
         )
-        def toggle_polling(start_clicks, stop_clicks, interval, running_state):
+        def toggle_polling(start_clicks, stop_clicks, interval, running_state, balance, entry_threshold, exit_threshold, fee):
             self.running_intervals = running_state
             if start_clicks > stop_clicks:
                 if interval not in self.simulators:
                     self.simulators[interval] = TradeSimulator(
-                        self.config['start_balance'],
-                        self.config['entry_threshold'],
-                        self.config['exit_threshold'],
-                        self.config['fee_pct'],
+                        balance or self.config['start_balance'],
+                        entry_threshold or self.config['entry_threshold'],
+                        exit_threshold or self.config['exit_threshold'],
+                        fee or self.config['fee_pct'],
                         interval
                     )
+                    logger.info(f"Инициализация симулятора ({interval}): баланс={balance or self.config['start_balance']}, "
+                               f"entry={entry_threshold or self.config['entry_threshold']}%, "
+                               f"exit={exit_threshold or self.config['exit_threshold']}%, fee={fee or self.config['fee_pct']}%")
                 self.running_intervals[interval] = True
                 poll_interval = self.config['poll_intervals'].get(interval, 5) * 1000
                 logger.info(f"Запуск опроса данных для интервала {interval} с частотой {poll_interval} мс")
@@ -132,6 +115,9 @@ class TradingDashboard:
             else:
                 self.running_intervals[interval] = False
                 logger.info(f"Остановка опроса данных для интервала {interval}")
+                if interval in self.simulators:
+                    self.simulators[interval].save_session()
+                    del self.simulators[interval]  # Удаляем симулятор при остановке
                 return True, 1000, html.Span("🔴 Остановлено", className='text-red-500 font-bold'), self.running_intervals
 
         @self.app.callback(
@@ -150,16 +136,17 @@ class TradingDashboard:
         def update_dashboard(n_intervals, start_clicks, interval, balance, entry_threshold, exit_threshold, fee):
             ctx = dash.callback_context
             if ctx.triggered_id == 'start-button':
-                self.simulators[interval] = TradeSimulator(
-                    balance or self.config['start_balance'],
-                    entry_threshold or self.config['entry_threshold'],
-                    exit_threshold or self.config['exit_threshold'],
-                    fee or self.config['fee_pct'],
-                    interval
-                )
-                logger.info(f"Запуск симулятора для интервала {interval}")
+                if interval not in self.simulators:
+                    self.simulators[interval] = TradeSimulator(
+                        balance or self.config['start_balance'],
+                        entry_threshold or self.config['entry_threshold'],
+                        exit_threshold or self.config['exit_threshold'],
+                        fee or self.config['fee_pct'],
+                        interval
+                    )
+                    logger.info(f"Запуск симулятора для интервала {interval}")
 
-            if n_intervals is None or not self.running_intervals[interval]:
+            if n_intervals is None or not self.running_intervals[interval] or interval not in self.simulators:
                 return (
                     f"BTC: {0:.8f}",
                     f"Баланс: {0:.2f} USDT",
@@ -225,5 +212,5 @@ class TradingDashboard:
                 self.update_config('ui.default_interval', main_interval)
             return ""
 
-    def run(self, port=8060):
+    def run(self, port=8050):
         self.app.run(host='0.0.0.0', port=port, debug=False)

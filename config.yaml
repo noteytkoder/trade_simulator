@@ -1,27 +1,18 @@
-# Настройки по умолчанию
-start_balance: 1000          # начальный баланс в USDT
-entry_threshold: 0.0001      # порог входа в процентах
-exit_threshold: 0.0001       # порог выхода в процентах
-fee_pct: 0.075               # комиссия биржи в процентах
-
-# Интервалы опроса для каждого временного интервала (в секундах)
-poll_intervals:
-  5s: 5                      # для 5-секундного интервала
-  1m: 10                     # для минутного интервала
-  1h: 60                     # для часового интервала
-
-# Endpoints для прогнозов
-endpoints:
-  five_sec: "http://185.5.248.212:8152/logs/predictions_dev.table"
-  minute_hour: "http://185.5.248.212:8150/logs/predictions_dev.table"
-
-# Аутентификация Dash UI
 auth:
-  username: admin
   password: qwerty63
-
-# интерфейс
+  username: admin
+endpoints:
+  five_sec: http://185.5.248.212:8152/logs/predictions_dev.table
+  minute_hour: http://185.5.248.212:8150/logs/predictions_dev.table
+entry_threshold: 0.0001
+exit_threshold: 0.0001
+fee_pct: 0.075
+poll_intervals:
+  1h: 60
+  1m: 10
+  5s: 5
+start_balance: 1000
 ui:
-  default_interval: "1m"
-  logs_interval: "5s"
-  logs_page_size: 25
+  default_interval: 1m
+  logs_interval: 1m
+  logs_page_size: 10

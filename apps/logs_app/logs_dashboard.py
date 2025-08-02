@@ -1,7 +1,7 @@
 import yaml
 import dash
 from dash import Dash, html, dcc, dash_table
-from dash.dependencies import Input, Output, State
+from dash.dependencies import Input, Output
 from utils.logger import setup_logger
 import os
 import csv
@@ -13,17 +13,29 @@ logger = setup_logger('logs_dashboard')
 
 class LogsDashboard:
     def __init__(self):
-        self.config = yaml.safe_load(open('config.yaml', 'r'))
-        self.app = Dash(__name__, external_stylesheets=[
-            'https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css'
-        ])
+        self.app = Dash(
+            __name__,
+            external_stylesheets=[
+                'https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css'
+            ],
+            suppress_callback_exceptions=True
+        )
+        self.logs_layout = self.create_logs_layout()
         self.setup_routes()
         self.register_callbacks()
+
+    def reload_config(self):
+        try:
+            with open('config.yaml', 'r', encoding='utf-8') as f:
+                return yaml.safe_load(f) or {}
+        except Exception as e:
+            logger.error(f"Ошибка чтения конфига: {e}")
+            return {}
 
     def update_config(self, key: str, value: any):
         try:
             with open('config.yaml', 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
+                config = yaml.safe_load(f) or {}
             keys = key.split('.')
             current = config
             for k in keys[:-1]:
@@ -35,13 +47,8 @@ class LogsDashboard:
         except Exception as e:
             logger.error(f"Ошибка обновления конфига: {e}")
 
-    def setup_routes(self):
-        self.app.layout = html.Div([
-            dcc.Location(id='url', refresh=False),
-            html.Div(id='page-content', className='container mx-auto p-4')
-        ])
-
-        logs_layout = html.Div([
+    def create_logs_layout(self):
+        return html.Div([
             html.H1("Логи торговли", className='text-3xl font-bold mb-6 text-center text-gray-800'),
             html.Label("Интервал логов:", className='font-medium mr-2'),
             dcc.Dropdown(
@@ -51,46 +58,59 @@ class LogsDashboard:
                     {'label': '1 минута', 'value': '1m'},
                     {'label': '1 час', 'value': '1h'}
                 ],
-                value=self.config.get('ui', {}).get('logs_interval', '5s'),
                 className='w-48 mb-4'
             ),
             html.Label("Записей на странице:", className='font-medium mr-2'),
             dcc.Dropdown(
                 id='page-size-dropdown',
                 options=[{'label': str(i), 'value': i} for i in [10, 25, 50, 100]],
-                value=self.config.get('ui', {}).get('logs_page_size', 25),
                 className='w-32 mb-4'
             ),
             html.Div(id='file-table-container', className='bg-white p-4 rounded-lg shadow-md mb-4'),
             dcc.Interval(id='log-update-interval', interval=5000, disabled=False)
         ])
 
-        def file_content_layout(filename):
-            return html.Div([
-                html.H1(f"Содержимое файла: {filename}", className='text-3xl font-bold mb-6 text-center text-gray-800'),
-                html.A('Назад к списку файлов', href='/', className='text-blue-500 hover:underline mb-4 inline-block'),
-                dcc.Dropdown(
-                    id='page-size-dropdown',
-                    options=[{'label': str(i), 'value': i} for i in [10, 25, 50, 100]],
-                    value=self.config.get('ui', {}).get('logs_page_size', 25),
-                    className='w-32 mb-4'
-                ),
-                html.Div(id='file-content-container', className='bg-white p-4 rounded-lg shadow-md')
-            ])
+    def create_file_content_layout(self, filename):
+        return html.Div([
+            html.H1(f"Содержимое файла: {filename}", className='text-3xl font-bold mb-6 text-center text-gray-800'),
+            html.A('Назад к списку файлов', href='/', className='text-blue-500 hover:underline mb-4 inline-block'),
+            html.Label("Записей на странице:", className='font-medium mr-2'),
+            dcc.Dropdown(
+                id='page-size-dropdown',
+                options=[{'label': str(i), 'value': i} for i in [10, 25, 50, 100]],
+                className='w-32 mb-4'
+            ),
+            html.Div(id='file-content-container', className='bg-white p-4 rounded-lg shadow-md')
+        ])
 
+    def setup_routes(self):
+        self.app.layout = html.Div([
+            dcc.Location(id='url', refresh=False),
+            html.Div(id='page-content', className='container mx-auto p-4')
+        ])
+
+    def register_callbacks(self):
         @self.app.callback(
             Output('page-content', 'children'),
             [Input('url', 'pathname')]
         )
         def display_page(pathname):
+            config = self.reload_config()
+            logs_interval = config.get('ui', {}).get('logs_interval', '5s')
+            page_size = config.get('ui', {}).get('logs_page_size', 25)
+
             if pathname == '/':
-                return logs_layout
+                layout = self.logs_layout
+                layout.children[2].value = logs_interval
+                layout.children[4].value = page_size
+                return layout
             elif pathname.startswith('/logs/'):
                 filename = urllib.parse.unquote(pathname[len('/logs/'):])
-                return file_content_layout(filename)
-            return logs_layout
+                layout = self.create_file_content_layout(filename)
+                layout.children[3].value = page_size
+                return layout
+            return self.logs_layout
 
-    def register_callbacks(self):
         @self.app.callback(
             Output('file-table-container', 'children'),
             [Input('log-update-interval', 'n_intervals'),
@@ -98,6 +118,10 @@ class LogsDashboard:
              Input('page-size-dropdown', 'value')]
         )
         def update_file_list(n_intervals, interval, page_size):
+            config = self.reload_config()
+            interval = interval or config.get('ui', {}).get('logs_interval', '5s')
+            page_size = page_size or config.get('ui', {}).get('logs_page_size', 25)
+
             def read_metadata(file_path):
                 metadata = {}
                 with open(file_path, 'r', encoding='utf-8') as f:
@@ -175,6 +199,9 @@ class LogsDashboard:
              Input('page-size-dropdown', 'value')]
         )
         def update_file_content(pathname, page_size):
+            config = self.reload_config()
+            page_size = page_size or config.get('ui', {}).get('logs_page_size', 25)
+
             if pathname.startswith('/logs/'):
                 filename = urllib.parse.unquote(pathname[len('/logs/'):])
                 filepath = os.path.join('simulations', filename)
@@ -244,7 +271,7 @@ class LogsDashboard:
         @self.app.callback(
             Output('url', 'pathname'),
             [Input('file-table', 'active_cell')],
-            [State('file-table', 'data')]
+            [dash.dependencies.State('file-table', 'data')]
         )
         def navigate_to_file(active_cell, file_data):
             if active_cell and file_data:
@@ -254,20 +281,22 @@ class LogsDashboard:
             return dash.no_update
 
         @self.app.callback(
-            Output('dummy-output', 'children'),
-            [Input('log-interval-dropdown', 'value'),
-             Input('page-size-dropdown', 'value')]
+            Output('log-interval-dropdown', 'value'),
+            [Input('log-interval-dropdown', 'value')]
         )
-        def update_config_values(logs_interval, page_size):
-            ctx = dash.callback_context
-            if not ctx.triggered:
-                return ""
-            triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
-            if triggered_id == 'log-interval-dropdown' and logs_interval:
+        def on_interval_change(logs_interval):
+            if logs_interval:
                 self.update_config('ui.logs_interval', logs_interval)
-            elif triggered_id == 'page-size-dropdown' and page_size:
-                self.update_config('ui.logs_page_size', page_size)
-            return ""
+            return logs_interval
 
-    def run(self, port=8061):
+        @self.app.callback(
+            Output('page-size-dropdown', 'value'),
+            [Input('page-size-dropdown', 'value')]
+        )
+        def on_page_size_change(page_size):
+            if page_size:
+                self.update_config('ui.logs_page_size', page_size)
+            return page_size
+
+    def run(self, port=8055):
         self.app.run(host='0.0.0.0', port=port, debug=False)
