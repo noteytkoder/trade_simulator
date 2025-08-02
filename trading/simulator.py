@@ -2,7 +2,11 @@ from datetime import datetime
 from typing import List, Dict, Tuple
 from utils.logger import setup_logger
 from utils.csv_writer import save_to_csv
-from backports.zoneinfo import ZoneInfo
+try:
+    from zoneinfo import ZoneInfo  # Python 3.9+
+except ImportError:
+    from backports.zoneinfo import ZoneInfo  # Python <3.9
+
 import os
 
 logger = setup_logger('simulator')

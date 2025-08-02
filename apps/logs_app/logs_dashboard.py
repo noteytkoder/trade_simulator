@@ -6,7 +6,11 @@ from utils.logger import setup_logger
 import os
 import csv
 from datetime import datetime
-from backports.zoneinfo import ZoneInfo
+try:
+    from zoneinfo import ZoneInfo  # Python 3.9+
+except ImportError:
+    from backports.zoneinfo import ZoneInfo  # Python <3.9
+
 import urllib.parse
 import tempfile
 import shutil

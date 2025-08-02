@@ -3,3 +3,5 @@ simulations/
 
 # логи приложения
 simulator.log
+
+venv/
