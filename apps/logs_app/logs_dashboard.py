@@ -33,19 +33,39 @@ class LogsDashboard:
             return {}
 
     def update_config(self, key: str, value: any):
+        import tempfile, shutil
+
         try:
+            # Загружаем актуальный конфиг с диска
             with open('config.yaml', 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f) or {}
+
+            # Спускаемся по ключам
             keys = key.split('.')
             current = config
             for k in keys[:-1]:
-                current = current.setdefault(k, {})
+                if k not in current or not isinstance(current[k], dict):
+                    current[k] = {}
+                current = current[k]
+
+            # Если значение не изменилось — выходим
+            if current.get(keys[-1]) == value:
+                return
+
+            # Обновляем значение
             current[keys[-1]] = value
-            with open('config.yaml', 'w', encoding='utf-8') as f:
-                yaml.safe_dump(config, f, allow_unicode=True)
-            logger.info(f"Обновлён конфиг: {key} = {value}")
+
+            # Запись атомарно через временный файл
+            tmp_fd, tmp_path = tempfile.mkstemp()
+            with os.fdopen(tmp_fd, 'w', encoding='utf-8') as tmp_file:
+                yaml.safe_dump(config, tmp_file, allow_unicode=True, sort_keys=False)
+
+            shutil.move(tmp_path, 'config.yaml')
+            logger.debug(f"Обновлён конфиг: {key} = {value}")
+
         except Exception as e:
             logger.error(f"Ошибка обновления конфига: {e}")
+
 
     def create_logs_layout(self):
         return html.Div([
