@@ -1,15 +1,18 @@
 import yaml
 import dash
 from dash import Dash, html, dcc, dash_table
-from dash.dependencies import Input, Output
+from dash.dependencies import Input, Output, State
 from utils.logger import setup_logger
 import os
 import csv
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import urllib.parse
+import tempfile
+import shutil
 
 logger = setup_logger('logs_dashboard')
+
 
 class LogsDashboard:
     def __init__(self):
@@ -25,6 +28,7 @@ class LogsDashboard:
         self.register_callbacks()
 
     def reload_config(self):
+        """Перечитать конфиг с диска."""
         try:
             with open('config.yaml', 'r', encoding='utf-8') as f:
                 return yaml.safe_load(f) or {}
@@ -33,14 +37,16 @@ class LogsDashboard:
             return {}
 
     def update_config(self, key: str, value: any):
-        import tempfile, shutil
-
+        """Безопасно обновить конфиг, не теряя другие ключи."""
         try:
-            # Загружаем актуальный конфиг с диска
-            with open('config.yaml', 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f) or {}
+            # Читаем актуальный конфиг
+            if os.path.exists('config.yaml'):
+                with open('config.yaml', 'r', encoding='utf-8') as f:
+                    config = yaml.safe_load(f) or {}
+            else:
+                config = {}
 
-            # Спускаемся по ключам
+            # Навигация по ключам
             keys = key.split('.')
             current = config
             for k in keys[:-1]:
@@ -52,20 +58,18 @@ class LogsDashboard:
             if current.get(keys[-1]) == value:
                 return
 
-            # Обновляем значение
+            # Обновляем
             current[keys[-1]] = value
 
-            # Запись атомарно через временный файл
+            # Пишем во временный файл и заменяем оригинал
             tmp_fd, tmp_path = tempfile.mkstemp()
             with os.fdopen(tmp_fd, 'w', encoding='utf-8') as tmp_file:
                 yaml.safe_dump(config, tmp_file, allow_unicode=True, sort_keys=False)
-
             shutil.move(tmp_path, 'config.yaml')
-            logger.debug(f"Обновлён конфиг: {key} = {value}")
 
+            logger.info(f"Обновлён конфиг: {key} = {value}")
         except Exception as e:
             logger.error(f"Ошибка обновления конфига: {e}")
-
 
     def create_logs_layout(self):
         return html.Div([
@@ -104,10 +108,24 @@ class LogsDashboard:
         ])
 
     def setup_routes(self):
+        """Основной layout + кастомный эндпоинт /logtotal"""
         self.app.layout = html.Div([
             dcc.Location(id='url', refresh=False),
             html.Div(id='page-content', className='container mx-auto p-4')
         ])
+
+        @self.app.server.route("/logtotal")
+        def get_logtotal():
+            log_file = "simulator.log"
+            try:
+                with open(log_file, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                # Новые записи сверху
+                return "".join(reversed(lines)), 200, {"Content-Type": "text/plain; charset=utf-8"}
+            except FileNotFoundError:
+                return "Файл лога не найден", 404
+            except Exception as e:
+                return f"Ошибка чтения лога: {e}", 500
 
     def register_callbacks(self):
         @self.app.callback(
@@ -182,7 +200,7 @@ class LogsDashboard:
                     {'name': 'Комиссия', 'id': 'fee'}
                 ]
 
-                file_table = dash_table.DataTable(
+                return dash_table.DataTable(
                     id='file-table',
                     data=file_data,
                     columns=file_columns,
@@ -208,7 +226,6 @@ class LogsDashboard:
                     page_action='native',
                     page_size=page_size
                 )
-                return file_table
             except Exception as e:
                 logger.error(f"Ошибка отображения списка файлов: {e}")
                 return html.P(f"Ошибка при загрузке списка файлов: {e}", className='text-red-500')
@@ -291,7 +308,7 @@ class LogsDashboard:
         @self.app.callback(
             Output('url', 'pathname'),
             [Input('file-table', 'active_cell')],
-            [dash.dependencies.State('file-table', 'data')]
+            [State('file-table', 'data')]
         )
         def navigate_to_file(active_cell, file_data):
             if active_cell and file_data:

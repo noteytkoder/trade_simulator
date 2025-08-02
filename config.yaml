@@ -4,8 +4,8 @@ auth:
 endpoints:
   five_sec: http://185.5.248.212:8152/logs/predictions_dev.table
   minute_hour: http://185.5.248.212:8150/logs/predictions_dev.table
-entry_threshold: 0.0001
-exit_threshold: 0.0001
+entry_threshold: 0.3
+exit_threshold: 0.3
 fee_pct: 0.075
 poll_intervals:
   1h: 60
@@ -15,4 +15,4 @@ start_balance: 1000
 ui:
   default_interval: 1m
   logs_interval: 1m
-  logs_page_size: 25
+  logs_page_size: 10
