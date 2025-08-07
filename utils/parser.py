@@ -11,14 +11,14 @@ logger = setup_logger('parser')
 class TableParser:
     @staticmethod
     def fetch(url: str, auth: tuple = None) -> str:
-        """Скачивает HTML-страницу по URL с повторными попытками"""
+        """Скачивает HTML-страницу по URL с повторными попытками."""
         session = requests.Session()
         retries = Retry(total=3, backoff_factor=0.5, status_forcelist=[404, 500, 502, 503, 504])
         session.mount('http://', HTTPAdapter(max_retries=retries))
         try:
             resp = session.get(url, auth=auth, timeout=5)
             resp.raise_for_status()
-            logger.debug(f"Успешно получены данные с {url}")
+            logger.info(f"Успешно получены данные с {url}")
             return resp.text
         except requests.RequestException as e:
             logger.error(f"Ошибка при получении данных с {url}: {e}")
@@ -47,7 +47,6 @@ class TableParser:
 
             last_row = rows[-1]
             cells = last_row.find_all('td')
-            logger.debug(f"Содержимое ячеек: {[cell.text.strip() for cell in cells]}")
 
             timestamp = cells[0].text.strip()
             actual_price = float(cells[1].text.strip())

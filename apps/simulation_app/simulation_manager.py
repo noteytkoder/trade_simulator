@@ -12,6 +12,7 @@ class SimulationManager:
         self.config = yaml.safe_load(open('config.yaml', 'r'))
         self.auth = (self.config['auth']['username'], self.config['auth']['password'])
         self.simulations = {}  # {interval: {"thread": ..., "sim": ..., "running": bool}}
+        self.current_price = None
 
     def start_simulation(self, interval, balance, entry_threshold, exit_threshold, fee):
         if interval in self.simulations and self.simulations[interval]["running"]:
@@ -48,11 +49,16 @@ class SimulationManager:
                 html_content = TableParser.fetch(endpoint, self.auth)
                 tick = TableParser.parse(html_content, interval)
                 if tick:
+                    self.current_price = tick['actual_price']
                     sim.process_tick(tick)
             except Exception as e:
                 logger.error(f"Ошибка в цикле симуляции ({interval}): {e}")
             time.sleep(poll_interval)
 
     def get_simulator(self, interval):
-        """Возвращает объект симулятора для чтения данных"""
+        """Возвращает объект симулятора для чтения данных."""
         return self.simulations.get(interval, {}).get("sim")
+
+    def get_current_price(self):
+        """Возвращает текущую цену BTCUSDT."""
+        return self.current_price

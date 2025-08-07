@@ -6,7 +6,7 @@ from utils.logger import setup_logger
 logger = setup_logger('csv_writer')
 
 def save_to_csv(trade_log: List[Dict], metadata: Dict, filename: str):
-    """Сохраняет логи торговли в CSV с метаданными"""
+    """Сохраняет логи торговли в CSV с метаданными."""
     try:
         logger.debug(f"Сохранение в CSV: {filename}, {len(trade_log)} записей")
         os.makedirs(os.path.dirname(filename), exist_ok=True)
@@ -17,12 +17,23 @@ def save_to_csv(trade_log: List[Dict], metadata: Dict, filename: str):
             f.write("\n")
             # Записываем логи с явным указанием всех полей
             if trade_log:
-                fieldnames = ['timestamp', 'type', 'price', 'amount', 'fee', 'balance', 'profit']
+                fieldnames = [
+                    'timestamp', 'type', 'price', 'amount', 'fee', 'balance', 'profit',
+                    'actual_price', 'predicted_price', 'predicted_change_pct', 'reason', 'prediction_accuracy'
+                ]
                 writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
                 writer.writeheader()
                 for row in trade_log:
-                    # Добавляем пустое значение для 'profit', если его нет
-                    row = {**row, 'profit': row.get('profit', '')}
+                    # Добавляем пустые значения для необязательных полей
+                    row = {
+                        **row,
+                        'profit': row.get('profit', ''),
+                        'actual_price': row.get('actual_price', ''),
+                        'predicted_price': row.get('predicted_price', ''),
+                        'predicted_change_pct': row.get('predicted_change_pct', ''),
+                        'reason': row.get('reason', ''),
+                        'prediction_accuracy': row.get('prediction_accuracy', '')
+                    }
                     writer.writerow(row)
             else:
                 logger.warning("trade_log пуст, записываются только метаданные")

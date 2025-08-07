@@ -34,6 +34,9 @@ class TradeSimulator:
             'interval': interval,
             'start_time': self.start_time
         }
+        self.correct_predictions = 0
+        self.total_predictions = 0
+        self.last_predicted_change = None
         logger.info(f"Инициализация симулятора ({interval}): баланс={start_balance}, entry={entry_threshold}%, exit={exit_threshold}%, fee={fee_pct}%")
 
     def process_tick(self, tick: Dict):
@@ -47,13 +50,27 @@ class TradeSimulator:
 
         if self.btc == 0:
             if change_pct >= self.entry_threshold:
-                self.buy(actual_price, msk_time)
+                self.last_predicted_change = change_pct
+                self.buy(actual_price, msk_time, pred_value, change_pct, "Entry: Predicted change >= threshold")
         else:
             current_change = (actual_price - self.buy_price) / self.buy_price
-            if current_change >= self.exit_threshold or change_pct < 0:
-                self.sell(actual_price, msk_time)
+            reason = None
+            if current_change >= self.exit_threshold:
+                reason = "Exit: Profit >= threshold"
+            elif change_pct < 0:
+                reason = "Exit: Predicted negative change"
+            if reason:
+                # Проверяем точность прогноза
+                actual_change = (actual_price - self.buy_price) / self.buy_price
+                is_correct = (self.last_predicted_change > 0 and actual_change > 0) or \
+                            (self.last_predicted_change < 0 and actual_change < 0)
+                self.total_predictions += 1
+                if is_correct:
+                    self.correct_predictions += 1
+                self.sell(actual_price, msk_time, pred_value, change_pct, reason, is_correct)
+                self.last_predicted_change = None
 
-    def buy(self, price: float, timestamp: str):
+    def buy(self, price: float, timestamp: str, predicted_price: float, predicted_change_pct: float, reason: str):
         if self.balance <= 0:
             return
         fee = self.balance * self.fee_pct
@@ -68,14 +85,18 @@ class TradeSimulator:
             'price': price,
             'amount': amount,
             'fee': fee,
-            'balance': self.balance
+            'balance': self.balance,
+            'actual_price': price,
+            'predicted_price': predicted_price,
+            'predicted_change_pct': predicted_change_pct,
+            'reason': reason
         }
         self.trade_log.append(log_entry)
         self.balance_series.append((timestamp, self.balance))
-        logger.info(f"Покупка: {amount:.6f} BTC по {price:.2f}, комиссия: {fee:.2f}")
+        logger.info(f"Покупка: {amount:.6f} BTC по {price:.2f}, комиссия: {fee:.2f}, причина: {reason}")
         self.save_session()
 
-    def sell(self, price: float, timestamp: str):
+    def sell(self, price: float, timestamp: str, predicted_price: float, predicted_change_pct: float, reason: str, prediction_accuracy: bool):
         if self.btc <= 0:
             return
 
@@ -91,11 +112,16 @@ class TradeSimulator:
             'amount': self.btc,
             'fee': fee,
             'balance': self.balance,
-            'profit': profit
+            'profit': profit,
+            'actual_price': price,
+            'predicted_price': predicted_price,
+            'predicted_change_pct': predicted_change_pct,
+            'reason': reason,
+            'prediction_accuracy': prediction_accuracy
         }
         self.trade_log.append(log_entry)
         self.balance_series.append((timestamp, self.balance))
-        logger.info(f"Продажа: {self.btc:.6f} BTC по {price:.2f}, комиссия: {fee:.2f}, прибыль: {profit:.2f}")
+        logger.info(f"Продажа: {self.btc:.6f} BTC по {price:.2f}, комиссия: {fee:.2f}, прибыль: {profit:.2f}, причина: {reason}, точность: {prediction_accuracy}")
         self.save_session()
 
         self.btc = 0
@@ -116,10 +142,12 @@ class TradeSimulator:
     def get_current_balance(self) -> float:
         return self.balance
 
+    def get_prediction_accuracy(self) -> float:
+        return (self.correct_predictions / self.total_predictions * 100) if self.total_predictions > 0 else 0.0
+
     def save_session(self):
         if not self.trade_log:
             return
-        # Создаём папку simulations, если её нет
         os.makedirs("simulations", exist_ok=True)
         filename = f"simulations/simulation_{self.start_time}_{self.interval}.csv"
         save_to_csv(self.trade_log, self.metadata, filename)
