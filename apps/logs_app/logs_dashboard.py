@@ -1,7 +1,8 @@
 import yaml
 import dash
-from dash import Dash, html, dcc, dash_table
+from dash import Dash, html, dcc, dash_table, no_update
 from dash.dependencies import Input, Output, State
+from flask_httpauth import HTTPBasicAuth
 from utils.logger import setup_logger
 from utils.auth import verify_credentials
 import os
@@ -26,12 +27,21 @@ class LogsDashboard:
             ],
             suppress_callback_exceptions=True
         )
-        self.logged_in = False
+        self.auth = HTTPBasicAuth()
         self.app.layout = self.create_layout()
         self.register_callbacks()
+        self.register_auth()
+
+    def register_auth(self):
+        @self.auth.verify_password
+        def verify_password(username, password):
+            return verify_credentials(username, password)
+
+        @self.app.server.before_request
+        def require_auth():
+            return self.auth.login_required(lambda: None)()
 
     def reload_config(self):
-        """Перечитать конфиг с диска."""
         try:
             with open('config.yaml', 'r', encoding='utf-8') as f:
                 return yaml.safe_load(f) or {}
@@ -40,7 +50,6 @@ class LogsDashboard:
             return {}
 
     def update_config(self, key: str, value: any):
-        """Безопасно обновить конфиг, не теряя другие ключи."""
         try:
             if os.path.exists('config.yaml'):
                 with open('config.yaml', 'r', encoding='utf-8') as f:
@@ -58,7 +67,7 @@ class LogsDashboard:
             if current.get(keys[-1]) == value:
                 return
 
-            current[keys[-1]] = value  # Исправлено: keys вместо keys[-1]
+            current[keys[-1]] = value
 
             tmp_fd, tmp_path = tempfile.mkstemp()
             with os.fdopen(tmp_fd, 'w', encoding='utf-8') as tmp_file:
@@ -72,20 +81,9 @@ class LogsDashboard:
     def create_layout(self):
         return html.Div([
             dcc.Location(id='url', refresh=False),
-            html.Div(id='page-content', children=self.create_login_layout())
-        ])
-
-    def create_login_layout(self):
-        return html.Div([
-            html.H1("Авторизация", className='text-3xl font-bold mb-6 text-center text-gray-800'),
-            html.Div(className='max-w-md mx-auto bg-white p-6 rounded-lg shadow-md', children=[
-                html.Label("Логин:", className='font-medium'),
-                dcc.Input(id='username-input', type='text', value='', className='border rounded px-2 py-1 w-full mb-4'),
-                html.Label("Пароль:", className='font-medium'),
-                dcc.Input(id='password-input', type='password', value='', className='border rounded px-2 py-1 w-full mb-4'),
-                html.Button('Войти', id='login-button', n_clicks=0, className='bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600'),
-                html.P(id='login-error', className='text-red-500 mt-2')
-            ])
+            dcc.Store(id='url-store'),
+            dcc.Store(id='page-size-store', data=self.reload_config().get('ui', {}).get('logs_page_size', 25)),  # Добавляем Store для page_size
+            html.Div(id='page-content', children=self.create_logs_layout())
         ])
 
     def create_logs_layout(self):
@@ -135,7 +133,6 @@ class LogsDashboard:
         ])
 
     def create_total_layout(self):
-        """Создаёт layout для страницы /logtotal с общей статистикой."""
         total_trades = 0
         total_profit = 0.0
         total_correct_predictions = 0
@@ -185,51 +182,46 @@ class LogsDashboard:
     def register_callbacks(self):
         @self.app.callback(
             Output('page-content', 'children'),
-            [Input('url', 'pathname')],
-            [State('username-input', 'value'),
-             State('password-input', 'value')]
+            [Input('url', 'pathname')]
         )
-        def update_page_content(pathname, username, password):
+        def update_page_content(pathname):
             if pathname == '/':
-                if not self.logged_in:
-                    return self.create_login_layout()
                 return self.create_logs_layout()
             elif pathname.startswith('/logs/'):
-                if not self.logged_in:
-                    return self.create_login_layout()
                 filename = urllib.parse.unquote(pathname[len('/logs/'):])
                 return self.create_file_content_layout(filename)
             elif pathname == '/logtotal':
-                if not self.logged_in:
-                    return self.create_login_layout()
                 return self.create_total_layout()
-            return self.create_login_layout()
+            return self.create_logs_layout()
 
         @self.app.callback(
-            Output('login-error', 'children'),
-            [Input('login-button', 'n_clicks')],
-            [State('username-input', 'value'),
-             State('password-input', 'value')]
+            Output('url-store', 'data'),
+            [Input('file-table', 'active_cell')],
+            [State('file-table', 'data')]
         )
-        def login(n_clicks, username, password):
-            if n_clicks > 0:
-                if verify_credentials(username, password):
-                    self.logged_in = True
-                    logger.info("Успешная авторизация")
-                    return ""
-                logger.info("Неудачная попытка авторизации")
-                return "Неверный логин или пароль"
-            return ""
+        def navigate_to_file(active_cell, file_data):
+            if active_cell and file_data:
+                row_index = active_cell['row']
+                filename = file_data[row_index]['filename']
+                return f"/logs/{urllib.parse.quote(filename)}"
+            return no_update
+
+        @self.app.callback(
+            Output('url', 'pathname'),
+            [Input('url-store', 'data')]
+        )
+        def update_url(new_path):
+            if new_path:
+                return new_path
+            return no_update
 
         @self.app.callback(
             Output('file-table-container', 'children'),
             [Input('log-update-interval', 'n_intervals'),
-             Input('log-interval-dropdown', 'value')]
+             Input('log-interval-dropdown', 'value'),
+             Input('page-size-store', 'data')]  # Добавляем зависимость от page-size-store
         )
-        def update_file_table(n_intervals, logs_interval):
-            if not self.logged_in:
-                return html.P("Требуется авторизация", className='text-red-500')
-
+        def update_file_table(n_intervals, logs_interval, page_size):
             try:
                 files = [
                     {'filename': f, 'size': os.path.getsize(os.path.join('simulations', f)),
@@ -241,25 +233,30 @@ class LogsDashboard:
                 return dash_table.DataTable(
                     id='file-table',
                     columns=[
-                        {'name': 'Файл', 'id': 'filename', 'type': 'text', 'presentation': 'markdown'},
-                        {'name': 'Размер (байт)', 'id': 'size', 'type': 'numeric'},
-                        {'name': 'Дата изменения', 'id': 'mtime', 'type': 'text'}
+                        {'name': 'Файл', 'id': 'filename', 'type': 'text'},
+                        {'name': 'Дата изменения', 'id': 'mtime', 'type': 'text'},
+                        {'name': 'Размер (байт)', 'id': 'size', 'type': 'numeric'}
                     ],
                     data=[{
-                        'filename': f"[**{row['filename']}**](/logs/{urllib.parse.quote(row['filename'])})",
-                        'size': row['size'],
-                        'mtime': row['mtime']
+                        'filename': row['filename'],
+                        'mtime': row['mtime'],
+                        'size': row['size']
                     } for row in files],
                     style_table={'overflowX': 'auto'},
                     style_cell={'textAlign': 'left', 'padding': '5px'},
                     style_header={'fontWeight': 'bold', 'backgroundColor': '#f3f4f6'},
                     style_data_conditional=[
-                        {'if': {'column_id': 'filename'}, 'color': 'blue', 'textDecoration': 'none'}
+                        {
+                            'if': {'column_id': 'filename'},
+                            'color': 'blue',
+                            'cursor': 'pointer',
+                            'textDecoration': 'underline'
+                        }
                     ],
                     sort_action='native',
                     filter_action='native',
                     page_action='native',
-                    page_size=10
+                    page_size=page_size or 10  # Используем page_size из page-size-store
                 )
             except Exception as e:
                 logger.error(f"Ошибка при обновлении таблицы файлов: {e}")
@@ -267,9 +264,10 @@ class LogsDashboard:
 
         @self.app.callback(
             Output('file-content', 'children'),
-            [Input('url', 'pathname')]
+            [Input('url', 'pathname'),
+             Input('page-size-store', 'data')]  # Добавляем зависимость от page-size-store
         )
-        def update_file_content(pathname):
+        def update_file_content(pathname, page_size):
             if not pathname.startswith('/logs/'):
                 return html.Div()
 
@@ -324,7 +322,7 @@ class LogsDashboard:
                         sort_action='native',
                         filter_action='native',
                         page_action='native',
-                        page_size=self.reload_config().get('ui', {}).get('logs_page_size', 25)
+                        page_size=page_size or 25  # Используем page_size из page-size-store
                     )
 
                     return html.Div([
@@ -353,19 +351,7 @@ class LogsDashboard:
                     return dcc.send_string(content, filename)
                 except Exception as e:
                     logger.error(f"Ошибка при скачивании файла {filename}: {e}")
-            return dash.no_update
-
-        @self.app.callback(
-            Output('url', 'pathname'),
-            [Input('file-table', 'active_cell')],
-            [State('file-table', 'data')]
-        )
-        def navigate_to_file(active_cell, file_data):
-            if active_cell and file_data:
-                row_index = active_cell['row']
-                filename = file_data[row_index]['filename']
-                return f"/logs/{urllib.parse.quote(filename)}"
-            return dash.no_update
+            return no_update
 
         @self.app.callback(
             Output('log-interval-dropdown', 'value'),
@@ -377,13 +363,15 @@ class LogsDashboard:
             return logs_interval
 
         @self.app.callback(
-            Output('page-size-dropdown', 'value'),
+            [Output('page-size-store', 'data'),
+             Output('page-size-dropdown', 'value')],
             [Input('page-size-dropdown', 'value')]
         )
         def on_page_size_change(page_size):
             if page_size:
                 self.update_config('ui.logs_page_size', page_size)
-            return page_size
+                return page_size, page_size
+            return no_update, no_update
 
     def run(self, port=8055):
         self.app.run(host='0.0.0.0', port=port, debug=False)

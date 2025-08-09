@@ -2,6 +2,7 @@ import yaml
 import dash
 from dash import Dash, html, dcc
 from dash.dependencies import Input, Output, State
+from flask_httpauth import HTTPBasicAuth
 from apps.simulation_app.simulation_manager import SimulationManager
 from utils.logger import setup_logger
 from utils.auth import verify_credentials, update_password
@@ -16,27 +17,24 @@ class TradingDashboard:
         self.app = Dash(__name__, external_stylesheets=[
             'https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css'
         ], suppress_callback_exceptions=True)
-        self.logged_in = False
+        self.auth = HTTPBasicAuth()
         self.app.layout = self.create_layout()
         self.register_callbacks()
+        self.register_auth()
+
+    def register_auth(self):
+        @self.auth.verify_password
+        def verify_password(username, password):
+            return verify_credentials(username, password)
+
+        @self.app.server.before_request
+        def require_auth():
+            return self.auth.login_required(lambda: None)()
 
     def create_layout(self):
         return html.Div([
             dcc.Location(id='url', refresh=False),
-            html.Div(id='page-content', children=self.create_login_layout())
-        ])
-
-    def create_login_layout(self):
-        return html.Div([
-            html.H1("Авторизация", className='text-3xl font-bold mb-6 text-center text-gray-800'),
-            html.Div(className='max-w-md mx-auto bg-white p-6 rounded-lg shadow-md', children=[
-                html.Label("Логин:", className='font-medium'),
-                dcc.Input(id='username-input', type='text', value='', className='border rounded px-2 py-1 w-full mb-4'),
-                html.Label("Пароль:", className='font-medium'),
-                dcc.Input(id='password-input', type='password', value='', className='border rounded px-2 py-1 w-full mb-4'),
-                html.Button('Войти', id='login-button', n_clicks=0, className='bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600'),
-                html.P(id='login-error', className='text-red-500 mt-2')
-            ])
+            html.Div(id='page-content', children=self.create_main_layout())
         ])
 
     def create_main_layout(self):
@@ -80,13 +78,13 @@ class TradingDashboard:
             dcc.Interval(id='poll-interval', interval=2000, disabled=False),
             html.Button('Сменить пароль', id='change-password-button', n_clicks=0, className='bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 mt-4'),
             html.Div(id='password-modal', style={'display': 'none'}, className='fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center', children=[
-                html.Div(className='bg-white p-6 rounded-lg shadow-md', children=[
+                html.Div(className='bg-white p-6 rounded-lg shadow-md max-w-md w-full', children=[
                     html.H3("Смена пароля", className='text-xl font-semibold mb-4'),
                     html.Label("Новый пароль:", className='font-medium'),
                     dcc.Input(id='new-password-input', type='password', value='', className='border rounded px-2 py-1 w-full mb-4'),
-                    html.Button('Подтвердить', id='confirm-password-button', n_clicks=0, className='bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600'),
-                    html.Button('Отмена', id='cancel-password-button', n_clicks=0, className='bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 ml-2'),
-                    html.P(id='password-error', className='text-red-500 mt-2')
+                    html.P(id='password-error', className='text-red-500 mb-4'),
+                    html.Button('Подтвердить', id='confirm-password-button', n_clicks=0, className='bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 mr-2'),
+                    html.Button('Отмена', id='cancel-password-button', n_clicks=0, className='bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600')
                 ])
             ])
         ])
@@ -94,23 +92,10 @@ class TradingDashboard:
     def register_callbacks(self):
         @self.app.callback(
             Output('page-content', 'children'),
-            [Input('login-button', 'n_clicks')],
-            [State('username-input', 'value'),
-             State('password-input', 'value')]
+            [Input('url', 'pathname')]
         )
-        def handle_login(n_clicks, username, password):
-            if n_clicks > 0:
-                if verify_credentials(username, password):
-                    self.logged_in = True
-                    logger.info("Успешная авторизация")
-                    return self.create_main_layout()
-                else:
-                    logger.warning("Неудачная попытка авторизации")
-                    return html.Div([
-                        self.create_login_layout(),
-                        html.P("Неверный логин или пароль", className='text-red-500 mt-2')
-                    ])
-            return self.create_login_layout()
+        def update_page_content(pathname):
+            return self.create_main_layout()
 
         @self.app.callback(
             Output('password-modal', 'style'),
@@ -178,16 +163,6 @@ class TradingDashboard:
             [State('interval-dropdown', 'value')]
         )
         def update_dashboard(n_intervals, interval):
-            if not self.logged_in:
-                return (
-                    "Текущий курс BTCUSDT: 0.0",
-                    "BTC: 0.0",
-                    "Баланс: 0.0 USDT",
-                    "Прибыль: 0.0 USDT",
-                    "Точность прогнозов: 0.0%",
-                    {'data': [], 'layout': {'title': 'Нет данных'}}
-                )
-
             sim = self.manager.get_simulator(interval)
             current_price = self.manager.get_current_price() or 0.0
             if not sim:

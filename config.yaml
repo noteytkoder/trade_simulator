@@ -15,4 +15,4 @@ start_balance: 1000
 ui:
   default_interval: 1m
   logs_interval: 5s
-  logs_page_size: 100
+  logs_page_size: 25
