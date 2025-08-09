@@ -18,7 +18,7 @@ class TableParser:
         try:
             resp = session.get(url, auth=auth, timeout=5)
             resp.raise_for_status()
-            logger.info(f"Успешно получены данные с {url}")
+            # logger.info(f"Успешно получены данные с {url}")
             return resp.text
         except requests.RequestException as e:
             logger.error(f"Ошибка при получении данных с {url}: {e}")
