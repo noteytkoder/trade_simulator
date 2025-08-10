@@ -15,9 +15,9 @@ class TradeSimulator:
         self.balance = start_balance
         self.btc = 0.0
         self.buy_price = 0.0
-        self.fee_pct = fee_pct
-        self.entry_threshold = entry_threshold
-        self.exit_threshold = exit_threshold
+        self.fee_pct = fee_pct  # комиссия в процентах, например 0.0075%
+        self.entry_threshold = entry_threshold  # порог входа в процентах, например 0.03%
+        self.exit_threshold = exit_threshold    # порог выхода в процентах, например 0.03%
         self.interval = interval
 
         self.trade_log = []
@@ -26,7 +26,6 @@ class TradeSimulator:
         ]
         self.start_time = datetime.now(ZoneInfo("Europe/Moscow")).strftime('%Y-%m-%d_%H-%M-%S').replace(':', '-')
 
-        # Для метаданных используем именно значения экземпляра, а не входные параметры
         self.metadata = {
             'start_balance': self.balance,
             'entry_threshold': self.entry_threshold,
@@ -38,21 +37,19 @@ class TradeSimulator:
 
         self.correct_predictions = 0
         self.total_predictions = 0
-        self.last_tick = None  # Храним предыдущий тик
-        self.pending_log = None  # Временное хранение лога для BUY
+        self.last_tick = None
+        self.pending_log = None
 
         logger.info(
             f"Инициализация симулятора ({self.interval}): "
-            f"баланс={self.balance}, вход={self.entry_threshold}, "
-            f"выход={self.exit_threshold}, комиссия={self.fee_pct}"
+            f"баланс={self.balance}, вход={self.entry_threshold}%, "
+            f"выход={self.exit_threshold}%, комиссия={self.fee_pct}%"
         )
 
-
     def check_prediction_accuracy(self, last_tick: Dict, current_price: float, operation: str) -> bool:
-        """Проверяет, совпадает ли знак прогноза и фактического изменения."""
         last_actual_price = last_tick['actual_price']
-        last_pred_change = last_tick['predictions'].get(self.interval)[1]  # predicted_change_pct в процентах
-        actual_change = ((current_price - last_actual_price) / last_actual_price) * 100  # В процентах
+        last_pred_change = last_tick['predictions'].get(self.interval)[1]  # предсказанное изменение в процентах
+        actual_change = ((current_price - last_actual_price) / last_actual_price) * 100  # актуальное изменение в процентах
 
         predicted_sign = 1 if last_pred_change > 0 else (-1 if last_pred_change < 0 else 0)
         actual_sign = 1 if actual_change > 0 else (-1 if actual_change < 0 else 0)
@@ -74,37 +71,42 @@ class TradeSimulator:
         actual_price = tick['actual_price']
         prediction = tick['predictions'].get(self.interval)
         if not prediction:
+            logger.info(f"[{self.interval}] Нет предсказания для текущего тика.")
             return
 
-        pred_value, change_pct, _ = prediction
+        pred_value, change_pct, _ = prediction  # change_pct в процентах
         msk_time = datetime.now(ZoneInfo("Europe/Moscow")).strftime('%Y-%m-%d %H:%M:%S')
 
         # Если позиции нет — ищем сигнал на покупку
         if self.btc == 0:
+            logger.info(f"[{self.interval}] Проверка на покупку: change_pct >= entry_threshold? {change_pct:.6f} >= {self.entry_threshold:.6f}")
             if change_pct >= self.entry_threshold:
+                logger.info(f"[{self.interval}] Сигнал на покупку с change_pct={change_pct:.6f}% (порог {self.entry_threshold:.6f}%)")
                 self.buy(actual_price, msk_time, pred_value, change_pct, "Вход: Прогнозируемое изменение >= порога")
-                return  # Предотвращаем повторные покупки в одном тике
+                return
 
         # Если позиция открыта — проверяем условия выхода
         else:
-            current_change = ((actual_price - self.buy_price) / self.buy_price) * 100
+            current_change = ((actual_price - self.buy_price) / self.buy_price) * 100  # изменение в процентах
+            logger.info(f"[{self.interval}] Проверка на продажу: текущая прибыль {current_change:.6f}% (порог {self.exit_threshold:.6f}%) и прогноз {change_pct:.6f}%")
             reason = None
             if current_change >= self.exit_threshold:
                 reason = "Выход: Прибыль >= порога"
+                logger.info(f"[{self.interval}] Условие выхода по прибыли выполнено: {current_change:.6f}% >= {self.exit_threshold:.6f}%")
             elif change_pct < 0:
                 reason = "Выход: Прогнозируемое отрицательное изменение"
+                logger.info(f"[{self.interval}] Условие выхода по прогнозу выполнено: change_pct < 0 ({change_pct:.6f}%)")
 
             if reason:
                 self.sell(actual_price, msk_time, pred_value, change_pct, reason)
-                return  # Предотвращаем повторные продажи в одном тике
+                return
 
-        # Обновляем last_tick, если ничего не делали
         self.last_tick = tick
 
     def buy(self, price: float, timestamp: str, predicted_price: float, predicted_change_pct: float, reason: str):
         if self.balance <= 0:
             return
-        fee = self.balance * self.fee_pct
+        fee = self.balance * (self.fee_pct / 100)  # преобразование комиссии из процентов в долю
         amount = (self.balance - fee) / price
         self.btc = amount
         self.buy_price = price
@@ -126,7 +128,7 @@ class TradeSimulator:
         }
         self.trade_log.append(self.pending_log)
         self.balance_series.append((timestamp, self.balance))
-        logger.info(f"Покупка: {amount:.6f} BTC по {price:.2f}, комиссия: {fee:.2f}, причина: {reason}, точность: None")
+        logger.info(f"Покупка: {amount:.6f} BTC по {price:.2f}, комиссия: {fee:.2f} (fee_pct={self.fee_pct}%), причина: {reason}, точность: None")
         self.save_session()
 
     def sell(self, price: float, timestamp: str, predicted_price: float, predicted_change_pct: float, reason: str):
@@ -134,7 +136,7 @@ class TradeSimulator:
             return
 
         proceeds = self.btc * price
-        fee = proceeds * self.fee_pct
+        fee = proceeds * (self.fee_pct / 100)  # преобразование комиссии из процентов в долю
         self.balance = proceeds - fee
         profit = self.balance - (self.btc * self.buy_price)
 
@@ -169,7 +171,7 @@ class TradeSimulator:
         }
         self.trade_log.append(self.pending_log)
         self.balance_series.append((timestamp, self.balance))
-        logger.info(f"Продажа: {self.btc:.6f} BTC по {price:.2f}, комиссия: {fee:.2f}, прибыль: {profit:.2f}, причина: {reason}, точность: {sell_accuracy}")
+        logger.info(f"Продажа: {self.btc:.6f} BTC по {price:.2f}, комиссия: {fee:.2f} (fee_pct={self.fee_pct}%), прибыль: {profit:.2f}, причина: {reason}, точность: {sell_accuracy}")
         self.save_session()
 
         self.btc = 0
