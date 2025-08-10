@@ -176,10 +176,25 @@ class LogsDashboard:
                 ])
             ])
         except Exception as e:
-            logger.error(f"Ошибка при формировании статистики /logtotal: {e}")
+            logger.error(f"Ошибка при формировании статистики /stats: {e}")
             return html.P(f"Ошибка при загрузке статистики: {e}", className='text-red-500')
 
     def register_callbacks(self):
+        
+        
+        @self.app.server.route("/logtotal")
+        def get_logtotal():
+            log_file = "simulator.log"
+            try:
+                with open(log_file, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                # Новые записи сверху
+                return "".join(reversed(lines)), 200, {"Content-Type": "text/plain; charset=utf-8"}
+            except FileNotFoundError:
+                return "Файл лога не найден", 404
+            except Exception as e:
+                return f"Ошибка чтения лога: {e}", 500
+            
         @self.app.callback(
             Output('page-content', 'children'),
             [Input('url', 'pathname')]
@@ -190,7 +205,7 @@ class LogsDashboard:
             elif pathname.startswith('/logs/'):
                 filename = urllib.parse.unquote(pathname[len('/logs/'):])
                 return self.create_file_content_layout(filename)
-            elif pathname == '/logtotal':
+            elif pathname == '/stats':
                 return self.create_total_layout()
             return self.create_logs_layout()
 
