@@ -19,22 +19,34 @@ class TradeSimulator:
         self.entry_threshold = entry_threshold
         self.exit_threshold = exit_threshold
         self.interval = interval
+
         self.trade_log = []
-        self.balance_series = [(datetime.now(ZoneInfo("Europe/Moscow")).strftime('%Y-%m-%d %H:%M:%S'), start_balance)]
+        self.balance_series = [
+            (datetime.now(ZoneInfo("Europe/Moscow")).strftime('%Y-%m-%d %H:%M:%S'), start_balance)
+        ]
         self.start_time = datetime.now(ZoneInfo("Europe/Moscow")).strftime('%Y-%m-%d_%H-%M-%S').replace(':', '-')
+
+        # Для метаданных используем именно значения экземпляра, а не входные параметры
         self.metadata = {
-            'start_balance': start_balance,
-            'entry_threshold': entry_threshold,
-            'exit_threshold': exit_threshold,
-            'fee_pct': fee_pct,
-            'interval': interval,
+            'start_balance': self.balance,
+            'entry_threshold': self.entry_threshold,
+            'exit_threshold': self.exit_threshold,
+            'fee_pct': self.fee_pct,
+            'interval': self.interval,
             'start_time': self.start_time
         }
+
         self.correct_predictions = 0
         self.total_predictions = 0
         self.last_tick = None  # Храним предыдущий тик
         self.pending_log = None  # Временное хранение лога для BUY
-        logger.info(f"Инициализация симулятора ({interval}): баланс={start_balance}, entry={entry_threshold}%, exit={exit_threshold}%, fee={fee_pct}%")
+
+        logger.info(
+            f"Инициализация симулятора ({self.interval}): "
+            f"баланс={self.balance}, вход={self.entry_threshold}, "
+            f"выход={self.exit_threshold}, комиссия={self.fee_pct}"
+        )
+
 
     def check_prediction_accuracy(self, last_tick: Dict, current_price: float, operation: str) -> bool:
         """Проверяет, совпадает ли знак прогноза и фактического изменения."""
