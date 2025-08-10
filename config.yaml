@@ -16,3 +16,11 @@ ui:
   default_interval: 5s
   logs_interval: 5s
   logs_page_size: 25
+env: dev
+ports:
+  prod:
+    simulation: 8060
+    logs: 8061
+  dev:
+    simulation: 8160
+    logs: 8161
