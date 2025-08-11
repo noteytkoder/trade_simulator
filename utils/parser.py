@@ -59,7 +59,7 @@ class TableParser:
                 change_match = re.search(r'[+-]?\d*\.\d+%?', change_and_time)
                 if not change_match:
                     raise ValueError("Неверный формат процента изменения")
-                change_pct = float(change_match.group().replace('%', '')) / 100
+                change_pct = float(change_match.group().replace('%', ''))
 
                 time_match = re.search(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', change_and_time)
                 if not time_match:
@@ -78,13 +78,13 @@ class TableParser:
                 min_pred = float(min_pred_text[0].strip())
                 min_change_and_time = min_pred_text[1].split(')')[0].strip() + min_pred_text[1].split(')')[1].strip()
                 min_change_match = re.search(r'[+-]?\d*\.\d+%?', min_change_and_time)
-                min_change = float(min_change_match.group().replace('%', '')) / 100
+                min_change = float(min_change_match.group().replace('%', ''))
                 min_time = re.search(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', min_change_and_time).group()
 
                 hour_pred_text = cells[3].text.strip().split('(')
                 hour_pred = float(hour_pred_text[0].strip())
                 hour_change_and_time = hour_pred_text[1].split(')')[0].strip() + hour_pred_text[1].split(')')[1].strip()
-                hour_change = float(re.search(r'[+-]?\d*\.\d+%?', hour_change_and_time).group().replace('%', '')) / 100
+                hour_change = float(re.search(r'[+-]?\d*\.\d+%?', hour_change_and_time).group().replace('%', ''))
                 hour_time = re.search(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', hour_change_and_time).group()
 
                 return {
