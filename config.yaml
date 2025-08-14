@@ -4,9 +4,9 @@ auth:
 endpoints:
   five_sec: http://185.5.248.212:8152/logs/predictions_dev.table
   minute_hour: http://185.5.248.212:8150/logs/predictions_dev.table
-entry_threshold: 0.03
-exit_threshold: 0.03
-fee_pct: 0.0075
+entry_threshold: 0.00003
+exit_threshold: 0.00003
+fee_pct: 0.0000075
 poll_intervals:
   1h: 60
   1m: 10
@@ -21,6 +21,8 @@ ports:
   prod:
     simulation: 8060
     logs: 8061
+    session_manager: 8062
   dev:
     simulation: 8160
     logs: 8161
+    session_manager: 8162

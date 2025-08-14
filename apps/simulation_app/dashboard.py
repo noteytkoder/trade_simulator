@@ -6,14 +6,20 @@ from flask_httpauth import HTTPBasicAuth
 from apps.simulation_app.simulation_manager import SimulationManager
 from utils.logger import setup_logger
 from utils.auth import verify_credentials, update_password
+from urllib.parse import parse_qs
+import logging
 
 logger = setup_logger('simulation_dashboard')
 
 class TradingDashboard:
     def __init__(self):
         self.config = yaml.safe_load(open('config.yaml', 'r'))
+        self.env = self.config.get('env', 'prod')
+        self.session_manager_port = self.config['ports'][self.env]['session_manager']
         self.auth_config = yaml.safe_load(open('auth.yaml', 'r'))
         self.manager = SimulationManager()
+        #logger.info(f"TradingDashboard использует SimulationManager, экземпляр: {id(self.manager)}, simulations: {id(self.manager.simulations)}")
+        logger.setLevel(getattr(logging, self.config.get('log_level', 'INFO')))
         self.app = Dash(__name__, external_stylesheets=[
             'https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css'
         ], suppress_callback_exceptions=True)
@@ -40,141 +46,90 @@ class TradingDashboard:
     def create_main_layout(self):
         return html.Div([
             html.H1("Симулятор торговли", className='text-3xl font-bold mb-6 text-center text-gray-800'),
-            html.Div(id='controls', className='mb-6 bg-white p-4 rounded-lg shadow-md', children=[
-                html.Div(className='flex flex-wrap gap-4 items-center', children=[
-                    html.Label("Баланс (USDT):", className='font-medium'),
-                    dcc.Input(id='balance-input', type='number', value=self.config['start_balance'], className='border rounded px-2 py-1 w-32'),
-                    html.Label("Порог входа (%):", className='font-medium'),
-                    dcc.Input(id='entry-threshold-input', type='number', value=self.config['entry_threshold'], className='border rounded px-2 py-1 w-32'),
-                    html.Label("Порог выхода (%):", className='font-medium'),
-                    dcc.Input(id='exit-threshold-input', type='number', value=self.config['exit_threshold'], className='border rounded px-2 py-1 w-32'),
-                    html.Label("Комиссия (%):", className='font-medium'),
-                    dcc.Input(id='fee-input', type='number', value=self.config['fee_pct'], className='border rounded px-2 py-1 w-32'),
-                    html.Label("Интервал:", className='font-medium'),
-                    dcc.Dropdown(
-                        id='interval-dropdown',
-                        options=[
-                            {'label': '5 секунд', 'value': '5s'},
-                            {'label': '1 минута', 'value': '1m'},
-                            {'label': '1 час', 'value': '1h'}
-                        ],
-                        value=self.config.get('ui', {}).get('default_interval', '1m'),
-                        className='w-48'
-                    ),
-                    html.Button('Старт', id='start-button', n_clicks=0, className='bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600'),
-                    html.Button('Стоп', id='stop-button', n_clicks=0, className='bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600'),
-                    html.Span(id='status-indicator', className='ml-4')
-                ])
+            html.A('Назад к менеджеру сессий', href=f"http://127.0.0.1:{self.session_manager_port}", className='text-blue-500 hover:underline mb-4 inline-block'),
+            html.Div(id='session-params', className='mb-6 bg-white p-4 rounded-lg shadow-md', children=[
+                html.H3("Параметры сессии", className='text-xl font-semibold mb-4'),
+                html.P(id='session-interval', children="Интервал: N/A", className='text-gray-700'),
+                html.P(id='session-balance', children="Начальный баланс: N/A", className='text-gray-700'),
+                html.P(id='session-entry', children="Порог входа: N/A", className='text-gray-700'),
+                html.P(id='session-exit', children="Порог выхода: N/A", className='text-gray-700'),
+                html.P(id='session-fee', children="Комиссия: N/A", className='text-gray-700'),
+                html.P(id='session-price', children="Текущий курс BTCUSDT: 0.0", className='text-gray-700'),
+                html.P(id='session-btc', children="BTC: 0.0", className='text-gray-700'),
+                html.P(id='session-current-balance', children="Баланс: 0.0", className='text-gray-700'),
+                html.P(id='session-profit', children="Прибыль: 0.0", className='text-gray-700'),
+                html.P(id='session-accuracy', children="Точность прогнозов: 0.0%", className='text-gray-700'),
             ]),
-            html.Div(id='stats', className='bg-white p-4 rounded-lg shadow-md mb-6', children=[
-                html.H3("Статистика сессии", className='text-xl font-semibold mb-4'),
-                html.P(id='current-price', children="Текущий курс BTCUSDT: 0.0", className='text-gray-700'),
-                html.P(id='btc-amount', children="BTC: 0.0", className='text-gray-700'),
-                html.P(id='current-balance', children="Баланс: 0.0 USDT", className='text-gray-700'),
-                html.P(id='total-profit', children="Прибыль: 0.0 USDT", className='text-gray-700'),
-                html.P(id='prediction-accuracy', children="Точность прогнозов: 0.0%", className='text-gray-700'),
-            ]),
-            dcc.Graph(id='balance-graph', config={'displayModeBar': True, 'scrollZoom': True}),
-            dcc.Interval(id='poll-interval', interval=2000, disabled=False),
-            html.Button('Сменить пароль', id='change-password-button', n_clicks=0, className='bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 mt-4'),
-            html.Div(id='password-modal', style={'display': 'none'}, className='fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center', children=[
-                html.Div(className='bg-white p-6 rounded-lg shadow-md max-w-md w-full', children=[
-                    html.H3("Смена пароля", className='text-xl font-semibold mb-4'),
-                    html.Label("Новый пароль:", className='font-medium'),
-                    dcc.Input(id='new-password-input', type='password', value='', className='border rounded px-2 py-1 w-full mb-4'),
-                    html.P(id='password-error', className='text-red-500 mb-4'),
-                    html.Button('Подтвердить', id='confirm-password-button', n_clicks=0, className='bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 mr-2'),
-                    html.Button('Отмена', id='cancel-password-button', n_clicks=0, className='bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600')
-                ])
-            ])
+            html.Div(id='error-message', children="", className='text-red-500 mb-4'),
+            dcc.Graph(id='balance-graph'),
+            html.Button("Пауза/Возобновить", id='pause-button', className='bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600', disabled=True),
+            dcc.Interval(id='interval-component', interval=2*1000, n_intervals=0)
         ])
 
     def register_callbacks(self):
         @self.app.callback(
-            Output('page-content', 'children'),
-            [Input('url', 'pathname')]
+            [
+                Output('session-price', 'children'),
+                Output('session-btc', 'children'),
+                Output('session-current-balance', 'children'),
+                Output('session-profit', 'children'),
+                Output('session-accuracy', 'children'),
+                Output('session-interval', 'children'),
+                Output('session-balance', 'children'),
+                Output('session-entry', 'children'),
+                Output('session-exit', 'children'),
+                Output('session-fee', 'children'),
+                Output('balance-graph', 'figure'),
+                Output('pause-button', 'disabled'),
+                Output('error-message', 'children')
+            ],
+            [Input('interval-component', 'n_intervals'), Input('url', 'search')]
         )
-        def update_page_content(pathname):
-            return self.create_main_layout()
-
-        @self.app.callback(
-            Output('password-modal', 'style'),
-            [Input('change-password-button', 'n_clicks'),
-             Input('cancel-password-button', 'n_clicks')],
-            [State('password-modal', 'style')]
-        )
-        def toggle_password_modal(change_n_clicks, cancel_n_clicks, current_style):
-            ctx = dash.callback_context
-            if ctx.triggered_id == 'change-password-button' and change_n_clicks > 0:
-                return {'display': 'flex'}
-            elif ctx.triggered_id == 'cancel-password-button' and cancel_n_clicks > 0:
-                return {'display': 'none'}
-            return current_style
-
-        @self.app.callback(
-            Output('password-error', 'children'),
-            [Input('confirm-password-button', 'n_clicks')],
-            [State('new-password-input', 'value')]
-        )
-        def handle_password_change(n_clicks, new_password):
-            if n_clicks > 0:
-                if new_password and len(new_password) >= 6:
-                    if update_password(new_password):
-                        return "Пароль успешно изменен"
-                    return "Ошибка при смене пароля"
-                return "Пароль должен быть не короче 6 символов"
-            return ""
-
-        @self.app.callback(
-            Output('status-indicator', 'children'),
-            [Input('start-button', 'n_clicks'), Input('stop-button', 'n_clicks')],
-            [State('interval-dropdown', 'value'), State('balance-input', 'value'),
-             State('entry-threshold-input', 'value'), State('exit-threshold-input', 'value'),
-             State('fee-input', 'value')]
-        )
-        def control_simulation(start_clicks, stop_clicks, interval, balance, entry, exit_t, fee):
-            ctx = dash.callback_context
-            trigger = ctx.triggered_id if ctx.triggered_id else None
-
-            if trigger is None:
-                sim_info = self.manager.simulations.get(interval)
-                if sim_info and sim_info.get("running"):
-                    return html.Span("🟢 Активно", className='text-green-500 font-bold')
-                return html.Span("⚪ Ожидание", className='text-gray-500 font-bold')
-
-            if trigger == "start-button":
-                self.manager.start_simulation(interval, balance, entry, exit_t, fee)
-                return html.Span("🟢 Активно", className='text-green-500 font-bold')
-
-            if trigger == "stop-button":
-                self.manager.stop_simulation(interval)
-                return html.Span("🔴 Остановлено", className='text-red-500 font-bold')
-
-            return html.Span("⚪ Ожидание", className='text-gray-500 font-bold')
-
-        @self.app.callback(
-            [Output('current-price', 'children'),
-             Output('btc-amount', 'children'),
-             Output('current-balance', 'children'),
-             Output('total-profit', 'children'),
-             Output('prediction-accuracy', 'children'),
-             Output('balance-graph', 'figure')],
-            [Input('poll-interval', 'n_intervals')],
-            [State('interval-dropdown', 'value')]
-        )
-        def update_dashboard(n_intervals, interval):
-            sim = self.manager.get_simulator(interval)
+        def update_dashboard(n_intervals, search):
+            query_params = parse_qs(search.lstrip('?'))
+            session_id = query_params.get('session_id', [None])[0]
+            logger.info(f"Попытка подгрузки сессии {session_id} из URL {search}. Экземпляр SimulationManager: {id(self.manager)}, simulations: {id(self.manager.simulations)}")
             current_price = self.manager.get_current_price() or 0.0
-            if not sim:
+
+            if session_id is None:
+                logger.warning("session_id не найден в URL, показываем дефолт")
                 return (
                     f"Текущий курс BTCUSDT: {current_price:.2f}",
                     "BTC: 0.0",
-                    "Баланс: 0.0 USDT",
-                    "Прибыль: 0.0 USDT",
+                    "Баланс: 0.0",
+                    "Прибыль: 0.0",
                     "Точность прогнозов: 0.0%",
-                    {'data': [], 'layout': {'title': 'Нет данных'}}
+                    "Интервал: N/A",
+                    "Начальный баланс: N/A",
+                    "Порог входа: N/A",
+                    "Порог выхода: N/A",
+                    "Комиссия: N/A",
+                    {'data': [], 'layout': {'title': 'Нет данных'}},
+                    True,
+                    "Выберите сессию"
                 )
 
+            interval = session_id.split('_')[0]
+            sim = self.manager.get_simulator(interval, session_id)
+            if not sim:
+                logger.warning(f"Сессия {session_id} не найдена в памяти, показываем дефолт")
+                return (
+                    f"Текущий курс BTCUSDT: {current_price:.2f}",
+                    "BTC: 0.0",
+                    "Баланс: 0.0",
+                    "Прибыль: 0.0",
+                    "Точность прогнозов: 0.0%",
+                    f"Интервал: {interval}",
+                    "Начальный баланс: N/A",
+                    "Порог входа: N/A",
+                    "Порог выхода: N/A",
+                    "Комиссия: N/A",
+                    {'data': [], 'layout': {'title': f'Сессия {session_id} не найдена'}},
+                    True,
+                    "Сессия не найдена в памяти"
+                )
+
+            logger.info(f"Сессия {session_id} подгружена успешно: параметры {sim.metadata}, данные {len(sim.trade_log)} записей")
             balance_series = sim.get_balance_series()
             figure = {
                 'data': [
@@ -187,19 +142,46 @@ class TradingDashboard:
                     }
                 ],
                 'layout': {
-                    'title': f'Баланс ({interval})',
+                    'title': f'Баланс ({interval}, сессия {session_id})',
                     'xaxis': {'title': 'Время'},
-                    'yaxis': {'title': 'USDT'}
+                    'yaxis': {'title': 'Баланс'}
                 }
             }
             return (
                 f"Текущий курс BTCUSDT: {current_price:.2f}",
                 f"BTC: {sim.get_current_btc():.6f}",
-                f"Баланс: {sim.get_current_balance():.2f} USDT",
-                f"Прибыль: {sim.get_total_profit():.2f} USDT",
+                f"Баланс: {sim.get_current_balance():.2f}",
+                f"Прибыль: {sim.get_total_profit():.2f}",
                 f"Точность прогнозов: {sim.get_prediction_accuracy():.2f}%",
-                figure
+                f"Интервал: {sim.interval}",
+                f"Начальный баланс: {sim.metadata['start_balance']:.2f}",
+                f"Порог входа: {sim.entry_threshold:.2f}%",
+                f"Порог выхода: {sim.exit_threshold:.2f}%",
+                f"Комиссия: {sim.fee_pct:.2f}%",
+                figure,
+                False,
+                ""
             )
 
-    def run(self, port=8050):
+        @self.app.callback(
+            Output('pause-button', 'children'),
+            [Input('pause-button', 'n_clicks'), Input('url', 'search')],
+            [State('pause-button', 'children')]
+        )
+        def control_simulation(n_clicks, search, current_label):
+            if n_clicks is None or n_clicks == 0:
+                return current_label
+            query_params = parse_qs(search.lstrip('?'))
+            session_id = query_params.get('session_id', [None])[0]
+            if session_id:
+                interval = session_id.split('_')[0]
+                sess_data = self.manager.simulations.get(interval, {}).get(session_id, {})
+                current_paused = sess_data.get('paused', False)
+                self.manager.pause_simulation(interval, session_id, not current_paused)
+                return "Возобновить" if current_paused else "Пауза"
+            return current_label
+
+    def run(self):
+        port = self.config['ports'][self.env]['simulation']
+        logger.info(f"Запуск dashboard на порту {port}")
         self.app.run(host='0.0.0.0', port=port, debug=False)

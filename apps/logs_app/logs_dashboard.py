@@ -117,8 +117,10 @@ class LogsDashboard:
     def create_file_content_layout(self, filename):
         config = self.reload_config()
         page_size = config.get('ui', {}).get('logs_page_size', 25)
+        # Извлекаем session_id из filename (simulation_{session_id}.csv)
+        session_id = filename.replace('simulation_', '').replace('.csv', '')
         return html.Div([
-            html.H1(f"Содержимое файла: {filename}", className='text-3xl font-bold mb-6 text-center text-gray-800'),
+            html.H1(f"Содержимое файла: {filename} (сессия {session_id})", className='text-3xl font-bold mb-6 text-center text-gray-800'),
             html.A('Назад к списку файлов', href='/', className='text-blue-500 hover:underline mb-4 inline-block', target='_self'),
             html.Button('Скачать CSV', id='download-button', n_clicks=0, className='bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 mb-4'),
             dcc.Download(id='download-file'),
@@ -132,147 +134,61 @@ class LogsDashboard:
             html.Div(id='file-content')
         ])
 
-    def create_total_layout(self):
-        total_trades = 0
-        total_profit = 0.0
-        total_correct_predictions = 0
-        total_predictions = 0
-        files_processed = 0
-
-        try:
-            for filename in os.listdir('simulations'):
-                if filename.endswith('.csv'):
-                    filepath = os.path.join('simulations', filename)
-                    with open(filepath, 'r', encoding='utf-8') as f:
-                        lines = f.readlines()
-                        lines_for_table = [line for line in lines if not line.startswith('#') and line.strip()]
-                        if not lines_for_table:
-                            continue
-                        reader = csv.DictReader(lines_for_table)
-                        for row in reader:
-                            total_trades += 1
-                            if row.get('profit'):
-                                try:
-                                    total_profit += float(row['profit'])
-                                except ValueError:
-                                    pass
-                            if row.get('prediction_accuracy') == 'True':
-                                total_correct_predictions += 1
-                            if row.get('prediction_accuracy') in ['True', 'False']:
-                                total_predictions += 1
-                    files_processed += 1
-
-            accuracy = (total_correct_predictions / total_predictions * 100) if total_predictions > 0 else 0.0
-
-            return html.Div([
-                html.H1("Общая статистика логов", className='text-3xl font-bold mb-6 text-center text-gray-800'),
-                html.A('Назад к списку файлов', href='/', className='text-blue-500 hover:underline mb-4 inline-block', target='_self'),
-                html.Div(className='bg-white p-4 rounded-lg shadow-md', children=[
-                    html.H3("Сводка", className='text-xl font-semibold mb-4'),
-                    html.P(f"Обработано файлов: {files_processed}", className='text-gray-700'),
-                    html.P(f"Всего сделок: {total_trades}", className='text-gray-700'),
-                    html.P(f"Общая прибыль: {total_profit:.2f} USDT", className='text-gray-700'),
-                    html.P(f"Точность прогнозов: {accuracy:.2f}%", className='text-gray-700')
-                ])
-            ])
-        except Exception as e:
-            logger.error(f"Ошибка при формировании статистики /stats: {e}")
-            return html.P(f"Ошибка при загрузке статистики: {e}", className='text-red-500')
-
     def register_callbacks(self):
-        
-        
-        @self.app.server.route("/logtotal")
-        def get_logtotal():
-            log_file = "simulator.log"
-            try:
-                with open(log_file, "r", encoding="utf-8") as f:
-                    lines = f.readlines()
-                # Новые записи сверху
-                return "".join(reversed(lines)), 200, {"Content-Type": "text/plain; charset=utf-8"}
-            except FileNotFoundError:
-                return "Файл лога не найден", 404
-            except Exception as e:
-                return f"Ошибка чтения лога: {e}", 500
-            
         @self.app.callback(
             Output('page-content', 'children'),
             [Input('url', 'pathname')]
         )
-        def update_page_content(pathname):
+        def display_page(pathname):
             if pathname == '/':
                 return self.create_logs_layout()
             elif pathname.startswith('/logs/'):
                 filename = urllib.parse.unquote(pathname[len('/logs/'):])
                 return self.create_file_content_layout(filename)
-            elif pathname == '/stats':
-                return self.create_total_layout()
-            return self.create_logs_layout()
-
-        @self.app.callback(
-            Output('url-store', 'data'),
-            [Input('file-table', 'active_cell')],
-            [State('file-table', 'data')]
-        )
-        def navigate_to_file(active_cell, file_data):
-            if active_cell and file_data:
-                row_index = active_cell['row']
-                filename = file_data[row_index]['filename']
-                return f"/logs/{urllib.parse.quote(filename)}"
-            return no_update
-
-        @self.app.callback(
-            Output('url', 'pathname'),
-            [Input('url-store', 'data')]
-        )
-        def update_url(new_path):
-            if new_path:
-                return new_path
-            return no_update
+            return html.Div('404 - Страница не найдена')
 
         @self.app.callback(
             Output('file-table-container', 'children'),
             [Input('log-update-interval', 'n_intervals'),
-             Input('log-interval-dropdown', 'value'),
-             Input('page-size-store', 'data')]  # Добавляем зависимость от page-size-store
+             Input('log-interval-dropdown', 'value')]
         )
-        def update_file_table(n_intervals, logs_interval, page_size):
+        def update_file_table(n, logs_interval):
             try:
-                files = [
-                    {'filename': f, 'size': os.path.getsize(os.path.join('simulations', f)),
-                     'mtime': datetime.fromtimestamp(os.path.getmtime(os.path.join('simulations', f)), tz=ZoneInfo("Europe/Moscow")).strftime('%Y-%m-%d %H:%M:%S')}
-                    for f in os.listdir('simulations') if f.endswith('.csv') and logs_interval in f
-                ]
-                files.sort(key=lambda x: x['mtime'], reverse=True)
+                files = [f for f in os.listdir('simulations') if f.endswith('.csv')]
+                files.sort(key=lambda x: os.path.getmtime(os.path.join('simulations', x)), reverse=True)
+                data = []
+                for filename in files:
+                    filepath = os.path.join('simulations', filename)
+                    metadata = {}
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            if line.startswith('#'):
+                                key, value = line[1:].strip().split(':', 1)
+                                metadata[key.strip()] = value.strip()
+                    data.append({
+                        'filename': filename,
+                        'session_id': metadata.get('session_id', 'N/A'),
+                        'interval': metadata.get('interval', 'N/A'),
+                        'start_time': metadata.get('start_time', 'N/A'),
+                        'link': html.A('Просмотреть', href=f'/logs/{urllib.parse.quote(filename)}', className='text-blue-500 hover:underline')
+                    })
 
-                return dash_table.DataTable(
-                    id='file-table',
+                table = dash_table.DataTable(
+                    data=data,
                     columns=[
-                        {'name': 'Файл', 'id': 'filename', 'type': 'text'},
-                        {'name': 'Дата изменения', 'id': 'mtime', 'type': 'text'},
-                        {'name': 'Размер (байт)', 'id': 'size', 'type': 'numeric'}
+                        {'name': 'Файл', 'id': 'filename'},
+                        {'name': 'Сессия ID', 'id': 'session_id'},
+                        {'name': 'Интервал', 'id': 'interval'},
+                        {'name': 'Время старта', 'id': 'start_time'},
+                        {'name': 'Ссылка', 'id': 'link', 'presentation': 'markdown'}
                     ],
-                    data=[{
-                        'filename': row['filename'],
-                        'mtime': row['mtime'],
-                        'size': row['size']
-                    } for row in files],
                     style_table={'overflowX': 'auto'},
                     style_cell={'textAlign': 'left', 'padding': '5px'},
                     style_header={'fontWeight': 'bold', 'backgroundColor': '#f3f4f6'},
-                    style_data_conditional=[
-                        {
-                            'if': {'column_id': 'filename'},
-                            'color': 'blue',
-                            'cursor': 'pointer',
-                            'textDecoration': 'underline'
-                        }
-                    ],
                     sort_action='native',
-                    filter_action='native',
-                    page_action='native',
-                    page_size=page_size or 10  # Используем page_size из page-size-store
+                    filter_action='native'
                 )
+                return table
             except Exception as e:
                 logger.error(f"Ошибка при обновлении таблицы файлов: {e}")
                 return html.P(f"Ошибка при загрузке списка файлов: {e}", className='text-red-500')

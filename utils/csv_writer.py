@@ -1,73 +1,40 @@
-import csv
+import pandas as pd
 import os
-from typing import List, Dict
 from utils.logger import setup_logger
 
 logger = setup_logger('csv_writer')
 
-def save_to_csv(trade_log: List[Dict], metadata: Dict, filename: str):
-    """Сохраняет логи торговли в CSV с метаданными."""
+def save_to_csv(trade_log: list[dict], metadata: dict, filename: str):
+    """Сохранение лога торгов в CSV с экранированием значений"""
+    if not trade_log:
+        logger.warning(f"Попытка сохранить пустой trade_log в {filename}")
+        return
     try:
-        logger.debug(f"Сохранение в CSV: {filename}, {len(trade_log)} записей")
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        with open(filename, 'w', newline='', encoding='utf-8') as f:
-            # Записываем метаданные как комментарии
-            for key, value in metadata.items():
-                f.write(f"# {key}: {value}\n")
-            f.write("\n")
-            # Записываем логи с явным указанием всех полей
-            if trade_log:
-                fieldnames = [
-                    'timestamp', 'type', 'price', 'amount', 'fee', 'balance', 'profit',
-                    'actual_price', 'predicted_price', 'predicted_change_pct', 'reason', 'prediction_accuracy'
-                ]
-                writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
-                writer.writeheader()
-                for row in trade_log:
-                    row = {
-                        **row,
-                        'profit': row.get('profit', ''),
-                        'actual_price': row.get('actual_price', ''),
-                        'predicted_price': row.get('predicted_price', ''),
-                        'predicted_change_pct': row.get('predicted_change_pct', ''),  # Сохраняем как есть
-                        'reason': row.get('reason', ''),
-                        'prediction_accuracy': row.get('prediction_accuracy', '')
-                    }
-                    writer.writerow(row)
-            else:
-                logger.warning("trade_log пуст, записываются только метаданные")
+        df = pd.DataFrame(trade_log)
+        # Экранируем значения, чтобы избежать проблем с запятыми
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                df[col] = df[col].astype(str).str.replace(',', '\\,')
+        df = pd.concat([pd.DataFrame([metadata]), df], ignore_index=True)
+        logger.debug(f"Сохранение в CSV {filename}: {df.to_dict()}")
+        df.to_csv(filename, index=False, escapechar='\\')
         logger.info(f"Сохранено в CSV: {filename}")
     except Exception as e:
         logger.error(f"Ошибка при сохранении в CSV {filename}: {e}")
 
-def update_csv_accuracy(trade_log: List[Dict], metadata: Dict, filename: str, pending_log: Dict):
-    """Обновляет последнюю запись в CSV с актуальной точностью прогноза."""
+def update_csv_accuracy(trade_log: list[dict], metadata: dict, filename: str, pending_log: dict):
+    """Обновление CSV с учётом точности прогноза"""
+    if not trade_log:
+        logger.warning(f"Попытка обновить пустой trade_log в {filename}")
+        return
     try:
-        logger.debug(f"Обновление CSV: {filename}, последняя запись: {pending_log}")
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-        with open(filename, 'w', newline='', encoding='utf-8') as f:
-            # Перезаписываем метаданные
-            for key, value in metadata.items():
-                f.write(f"# {key}: {value}\n")
-            f.write("\n")
-            # Перезаписываем весь лог
-            fieldnames = [
-                'timestamp', 'type', 'price', 'amount', 'fee', 'balance', 'profit',
-                'actual_price', 'predicted_price', 'predicted_change_pct', 'reason', 'prediction_accuracy'
-            ]
-            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
-            writer.writeheader()
-            for row in trade_log:
-                row = {
-                    **row,
-                    'profit': row.get('profit', ''),
-                    'actual_price': row.get('actual_price', ''),
-                    'predicted_price': row.get('predicted_price', ''),
-                    'predicted_change_pct': row.get('predicted_change_pct', ''),  # Сохраняем как есть
-                    'reason': row.get('reason', ''),
-                    'prediction_accuracy': row.get('prediction_accuracy', '')
-                }
-                writer.writerow(row)
+        df = pd.DataFrame(trade_log)
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                df[col] = df[col].astype(str).str.replace(',', '\\,')
+        df = pd.concat([pd.DataFrame([metadata]), df], ignore_index=True)
+        logger.debug(f"Обновление CSV {filename}: {df.to_dict()}")
+        df.to_csv(filename, index=False, escapechar='\\')
         logger.info(f"CSV успешно обновлён: {filename}")
     except Exception as e:
         logger.error(f"Ошибка при обновлении CSV {filename}: {e}")
