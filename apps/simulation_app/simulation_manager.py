@@ -80,9 +80,10 @@ class SimulationManager:
                     if not self.simulations[interval][session_id]["running"]:
                         logger.info(f"Сессия {session_id} остановлена, завершаем поток. simulations адрес: {id(self.simulations)}")
                         break
-                    if self.simulations[interval][session_id]["paused"]:
-                        time.sleep(1)
-                        continue
+                    paused = self.simulations[interval][session_id]["paused"]
+                if paused:
+                    time.sleep(1)
+                    continue
                 try:
                     endpoint = (
                         self.config['endpoints']['five_sec']

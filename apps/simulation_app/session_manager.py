@@ -90,7 +90,8 @@ class SessionManagerDashboard:
                     'entry_threshold': f"{s['entry_threshold']:.2f}%",
                     'exit_threshold': f"{s['exit_threshold']:.2f}%",
                     'fee_pct': f"{s['fee_pct']:.2f}%",
-                    'link': f"[Открыть](http://127.0.0.1:{self.simulation_port}?session_id={s['session_id']})",
+                    'view_dashboard': f"[Открыть дашборд](http://127.0.0.1:{self.simulation_port}?session_id={s['session_id']})",
+                    'view_log': f"[Открыть лог](http://127.0.0.1:{self.config['ports'][self.env]['logs']}/logs/simulation_{s['session_id']}.csv)",
                     'stop_action': '[Остановить]' if s['running'] else '—',
                     'pause_action': '[Пауза]' if s['running'] and not s['paused'] else '[Возобновить]' if s['running'] and s['paused'] else '—'
                 } for s in sessions
@@ -110,7 +111,8 @@ class SessionManagerDashboard:
                     {'name': 'Порог входа', 'id': 'entry_threshold'},
                     {'name': 'Порог выхода', 'id': 'exit_threshold'},
                     {'name': 'Комиссия', 'id': 'fee_pct'},
-                    {'name': 'Ссылка', 'id': 'link', 'type': 'text', 'presentation': 'markdown'},
+                    {'name': 'Дашборд', 'id': 'view_dashboard', 'type': 'text', 'presentation': 'markdown'},
+                    {'name': 'Лог', 'id': 'view_log', 'type': 'text', 'presentation': 'markdown'},
                     {'name': 'Стоп', 'id': 'stop_action', 'type': 'text', 'presentation': 'markdown'},
                     {'name': 'Пауза', 'id': 'pause_action', 'type': 'text', 'presentation': 'markdown'}
                 ],
@@ -118,6 +120,16 @@ class SessionManagerDashboard:
                 style_table={'overflowX': 'auto'},
                 style_cell={'textAlign': 'left', 'padding': '5px'},
                 style_header={'fontWeight': 'bold', 'backgroundColor': '#f3f4f6'},
+                style_data_conditional=[
+                    {
+                        'if': {'column_id': 'stop_action'},
+                        'backgroundColor': 'red', 'color': 'white', 'cursor': 'pointer', 'textAlign': 'center', 'fontWeight': 'bold'
+                    },
+                    {
+                        'if': {'column_id': 'pause_action'},
+                        'backgroundColor': 'blue', 'color': 'white', 'cursor': 'pointer', 'textAlign': 'center', 'fontWeight': 'bold'
+                    }
+                ],
                 sort_action='native'
             )
             return table

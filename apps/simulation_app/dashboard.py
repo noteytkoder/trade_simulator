@@ -8,6 +8,7 @@ from utils.logger import setup_logger
 from utils.auth import verify_credentials, update_password
 from urllib.parse import parse_qs
 import logging
+from datetime import datetime
 
 logger = setup_logger('simulation_dashboard')
 
@@ -131,6 +132,7 @@ class TradingDashboard:
 
             logger.info(f"Сессия {session_id} подгружена успешно: параметры {sim.metadata}, данные {len(sim.trade_log)} записей")
             balance_series = sim.get_balance_series()
+            balance_series = sorted(balance_series, key=lambda t: datetime.strptime(t[0], '%Y-%m-%d %H:%M:%S'))
             figure = {
                 'data': [
                     {

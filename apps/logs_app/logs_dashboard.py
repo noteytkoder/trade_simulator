@@ -20,6 +20,8 @@ logger = setup_logger('logs_dashboard')
 
 class LogsDashboard:
     def __init__(self):
+        self.config = yaml.safe_load(open('config.yaml', 'r'))
+        self.env = self.config.get('env', 'prod')
         self.app = Dash(
             __name__,
             external_stylesheets=[
@@ -137,73 +139,73 @@ class LogsDashboard:
     def register_callbacks(self):
         @self.app.callback(
             Output('page-content', 'children'),
-            [Input('url', 'pathname')]
+            [Input('url', 'pathname'), Input('url-store', 'data')]
         )
-        def display_page(pathname):
+        def update_page_content(pathname, data):
             if pathname == '/':
                 return self.create_logs_layout()
             elif pathname.startswith('/logs/'):
                 filename = urllib.parse.unquote(pathname[len('/logs/'):])
                 return self.create_file_content_layout(filename)
-            return html.Div('404 - Страница не найдена')
+            return html.P("Страница не найдена", className='text-red-500')
 
         @self.app.callback(
             Output('file-table-container', 'children'),
-            [Input('log-update-interval', 'n_intervals'),
-             Input('log-interval-dropdown', 'value')]
+            [Input('log-update-interval', 'n_intervals'), Input('log-interval-dropdown', 'value')]
         )
-        def update_file_table(n, logs_interval):
-            try:
-                files = [f for f in os.listdir('simulations') if f.endswith('.csv')]
-                files.sort(key=lambda x: os.path.getmtime(os.path.join('simulations', x)), reverse=True)
-                data = []
-                for filename in files:
-                    filepath = os.path.join('simulations', filename)
-                    metadata = {}
-                    with open(filepath, 'r', encoding='utf-8') as f:
-                        for line in f:
-                            if line.startswith('#'):
-                                key, value = line[1:].strip().split(':', 1)
-                                metadata[key.strip()] = value.strip()
-                    data.append({
-                        'filename': filename,
-                        'session_id': metadata.get('session_id', 'N/A'),
-                        'interval': metadata.get('interval', 'N/A'),
-                        'start_time': metadata.get('start_time', 'N/A'),
-                        'link': html.A('Просмотреть', href=f'/logs/{urllib.parse.quote(filename)}', className='text-blue-500 hover:underline')
-                    })
+        def update_file_table(n_intervals, logs_interval):
+            files = []
+            folder = 'simulations'
+            if os.path.exists(folder):
+                files = [f for f in os.listdir(folder) if f.endswith('.csv')]
+                files.sort(key=lambda f: os.path.getmtime(os.path.join(folder, f)), reverse=True)
 
-                table = dash_table.DataTable(
-                    data=data,
-                    columns=[
-                        {'name': 'Файл', 'id': 'filename'},
-                        {'name': 'Сессия ID', 'id': 'session_id'},
-                        {'name': 'Интервал', 'id': 'interval'},
-                        {'name': 'Время старта', 'id': 'start_time'},
-                        {'name': 'Ссылка', 'id': 'link', 'presentation': 'markdown'}
-                    ],
-                    style_table={'overflowX': 'auto'},
-                    style_cell={'textAlign': 'left', 'padding': '5px'},
-                    style_header={'fontWeight': 'bold', 'backgroundColor': '#f3f4f6'},
-                    sort_action='native',
-                    filter_action='native'
-                )
-                return table
-            except Exception as e:
-                logger.error(f"Ошибка при обновлении таблицы файлов: {e}")
-                return html.P(f"Ошибка при загрузке списка файлов: {e}", className='text-red-500')
+            if not files:
+                return html.P("Нет файлов логов", className='text-gray-500')
+
+            data = []
+            for filename in files:
+                filepath = os.path.join(folder, filename)
+                file_time = datetime.fromtimestamp(os.path.getmtime(filepath)).strftime('%Y-%m-%d %H:%M:%S')
+                session_id = filename.replace('simulation_', '').replace('.csv', '')
+                interval = session_id.split('_')[0]
+                data.append({
+                    'filename': filename,
+                    'session_id': session_id,
+                    'interval': interval,
+                    'modified': file_time,
+                    'link': f"[Открыть](/logs/{urllib.parse.quote(filename)})"
+                })
+
+            table = dash_table.DataTable(
+                id='file-table',
+                columns=[
+                    {'name': 'Имя файла', 'id': 'filename'},
+                    {'name': 'ID сессии', 'id': 'session_id'},
+                    {'name': 'Интервал', 'id': 'interval'},
+                    {'name': 'Дата изменения', 'id': 'modified'},
+                    {'name': 'Ссылка', 'id': 'link', 'presentation': 'markdown'}
+                ],
+                data=data,
+                style_table={'overflowX': 'auto'},
+                style_cell={'textAlign': 'left', 'padding': '5px'},
+                style_header={'fontWeight': 'bold', 'backgroundColor': '#f3f4f6'},
+                sort_action='native'
+            )
+            return table
 
         @self.app.callback(
             Output('file-content', 'children'),
-            [Input('url', 'pathname'),
-             Input('page-size-store', 'data')]  # Добавляем зависимость от page-size-store
+            [Input('url', 'pathname'), Input('page-size-store', 'data')]
         )
-        def update_file_content(pathname, page_size):
+        def load_log_content(pathname, page_size):
             if not pathname.startswith('/logs/'):
-                return html.Div()
-
+                return no_update
             filename = urllib.parse.unquote(pathname[len('/logs/'):])
             filepath = os.path.join('simulations', filename)
+            if not os.path.exists(filepath):
+                return html.P(f"Файл {filename} не найден", className='text-red-500')
+
             try:
                 with open(filepath, 'r', encoding='utf-8') as f:
                     lines = f.readlines()
@@ -304,5 +306,7 @@ class LogsDashboard:
                 return page_size, page_size
             return no_update, no_update
 
-    def run(self, port=8055):
+    def run(self):
+        port = self.config['ports'][self.env]['logs']
+        logger.info(f"Запуск LogsDashboard на порту {port}")
         self.app.run(host='0.0.0.0', port=port, debug=False)
