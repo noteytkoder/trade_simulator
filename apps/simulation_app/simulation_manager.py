@@ -23,18 +23,26 @@ class SimulationManager:
         self.config = yaml.safe_load(open('config.yaml', 'r'))
         logger.setLevel(getattr(logging, self.config.get('log_level', 'INFO')))
         self.auth = (self.config['auth']['username'], self.config['auth']['password'])
+        self.mae_stop_enabled = self.config.get('mae_stop_enabled', True)
+        self.mae_stop_threshold = self.config.get('mae_stop_threshold', 12.0)
+        self.stop_loss_pct = self.config.get('stop_loss_pct', 0.01)
         self.simulations = {}
         self.current_price = None
         self.lock = threading.Lock()
         logger.info(f"Singleton SimulationManager создан, экземпляр адрес: {id(self)}, simulations адрес: {id(self.simulations)}")
 
-    def start_simulation(self, interval, balance, entry_threshold, exit_threshold, fee) -> str:
+    def start_simulation(self, interval, balance, entry_threshold, exit_threshold, fee,
+                        mae_stop_enabled=None, mae_stop_threshold=None, stop_loss_pct=None) -> str:
         session_id = f"{interval}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        mae_stop_enabled = mae_stop_enabled if mae_stop_enabled is not None else self.mae_stop_enabled
+        mae_stop_threshold = mae_stop_threshold if mae_stop_threshold is not None else self.mae_stop_threshold
+        stop_loss_pct = stop_loss_pct if stop_loss_pct is not None else self.stop_loss_pct
         with self.lock:
             logger.debug(f"Начало создания сессии {session_id} для {interval}. Экземпляр: {id(self)}, simulations: {id(self.simulations)}")
             if interval not in self.simulations:
                 self.simulations[interval] = {}
-            sim = TradeSimulator(balance, entry_threshold, exit_threshold, fee, interval, session_id)
+            sim = TradeSimulator(balance, entry_threshold, exit_threshold, fee, interval, session_id,
+                                 mae_stop_enabled, mae_stop_threshold, stop_loss_pct)
             thread = threading.Thread(target=self._run_loop, args=(sim, session_id), daemon=True)
             self.simulations[interval][session_id] = {
                 "thread": thread,
@@ -62,7 +70,12 @@ class SimulationManager:
     def pause_simulation(self, interval, session_id, pause: bool):
         with self.lock:
             if interval in self.simulations and session_id in self.simulations[interval]:
+                sim = self.simulations[interval][session_id]["sim"]
                 self.simulations[interval][session_id]["paused"] = pause
+                if pause and sim.get_current_btc() > 0:
+                    sim.set_stop_loss()
+                elif not pause:
+                    sim.stop_loss_price = None
                 logger.info(f"Сессия {session_id} {'приостановлена' if pause else 'возобновлена'}. Текущее состояние: paused={pause}, running={self.simulations[interval][session_id]['running']}, simulations адрес: {id(self.simulations)}")
             else:
                 logger.warning(f"Сессия {session_id} не найдена для паузы в {interval}. Текущее хранение: {self.simulations.get(interval, 'пусто')}, simulations адрес: {id(self.simulations)}")
@@ -81,9 +94,6 @@ class SimulationManager:
                         logger.info(f"Сессия {session_id} остановлена, завершаем поток. simulations адрес: {id(self.simulations)}")
                         break
                     paused = self.simulations[interval][session_id]["paused"]
-                if paused:
-                    time.sleep(1)
-                    continue
                 try:
                     endpoint = (
                         self.config['endpoints']['five_sec']
@@ -94,7 +104,10 @@ class SimulationManager:
                     tick = TableParser.parse(html_content, interval)
                     if tick:
                         self.current_price = tick['actual_price']
-                        sim.process_tick(tick)
+                        if paused:
+                            sim.monitor_stop_loss(tick)
+                        else:
+                            sim.process_tick(tick)
                 except Exception as e:
                     logger.error(f"Ошибка в цикле симуляции ({interval}, сессия {session_id}): {e}. Продолжаем работу, сессия не удаляется.")
                 time.sleep(poll_interval)
@@ -129,7 +142,12 @@ class SimulationManager:
                         "start_time": sim.start_time,
                         "entry_threshold": sim.entry_threshold,
                         "exit_threshold": sim.exit_threshold,
-                        "fee_pct": sim.fee_pct
+                        "fee_pct": sim.fee_pct,
+                        "mae_stop_enabled": sim.mae_stop_enabled,
+                        "mae_stop_threshold": sim.mae_stop_threshold,
+                        "stop_loss_pct": sim.stop_loss_pct,
+                        "auto_paused": sim.auto_paused,
+                        "last_mae": sim.get_last_mae()
                     })
             logger.info(f"Список сессий возвращён: {len(sessions)} активных сессий. Экземпляр: {id(self)}, simulations: {id(self.simulations)}, хранение: {self.simulations.keys()}")
         return sessions

@@ -18,7 +18,6 @@ class TableParser:
         try:
             resp = session.get(url, auth=auth, timeout=5)
             resp.raise_for_status()
-            # logger.info(f"Успешно получены данные с {url}")
             return resp.text
         except requests.RequestException as e:
             logger.error(f"Ошибка при получении данных с {url}: {e}")
@@ -29,9 +28,10 @@ class TableParser:
         """
         Извлекает из HTML-таблицы последнюю строку.
         Возвращает словарь с полями:
-          - timestamp: str (время факта)
-          - actual_price: float
-          - predictions: dict<model_name, (value, change_pct, forecast_time)>
+        - timestamp: str (время факта)
+        - actual_price: float
+        - predictions: dict<model_name, (value, change_pct, forecast_time)>
+        - mae_10min: float или None (MAE за 10 минут)
         """
         try:
             soup = BeautifulSoup(html, 'html.parser')
@@ -51,6 +51,9 @@ class TableParser:
             timestamp = cells[0].text.strip()
             actual_price = float(cells[1].text.strip())
 
+            predictions = {}
+            mae_10min = None
+
             if interval == '5s':
                 pred_text = cells[2].text.strip().split('(')
                 pred_value = float(pred_text[0].strip())
@@ -66,13 +69,10 @@ class TableParser:
                     raise ValueError("Неверный формат времени прогноза")
                 pred_time = time_match.group()
 
-                return {
-                    'timestamp': timestamp,
-                    'actual_price': actual_price,
-                    'predictions': {
-                        '5s': (pred_value, change_pct, pred_time)
-                    }
-                }
+                predictions['5s'] = (pred_value, change_pct, pred_time)
+                mae_text = cells[3].text.strip()
+                mae_10min = float(mae_text) if mae_text != "..." else None  # Обработка "..."
+
             else:
                 min_pred_text = cells[2].text.strip().split('(')
                 min_pred = float(min_pred_text[0].strip())
@@ -87,14 +87,18 @@ class TableParser:
                 hour_change = float(re.search(r'[+-]?\d*\.\d+%?', hour_change_and_time).group().replace('%', ''))
                 hour_time = re.search(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', hour_change_and_time).group()
 
-                return {
-                    'timestamp': timestamp,
-                    'actual_price': actual_price,
-                    'predictions': {
-                        '1m': (min_pred, min_change, min_time),
-                        '1h': (hour_pred, hour_change, hour_time)
-                    }
+                predictions = {
+                    '1m': (min_pred, min_change, min_time),
+                    '1h': (hour_pred, hour_change, hour_time)
                 }
+                # Если MAE добавится для 1m/1h, добавить: mae_text = cells[4].text.strip(); mae_10min = float(mae_text) if mae_text != "..." else None
+
+            return {
+                'timestamp': timestamp,
+                'actual_price': actual_price,
+                'predictions': predictions,
+                'mae_10min': mae_10min
+            }
 
         except Exception as e:
             logger.error(f"Ошибка парсинга HTML: {e}")

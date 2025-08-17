@@ -2,11 +2,14 @@ auth:
   password: qwerty63
   username: admin
 endpoints:
-  five_sec: http://185.5.248.212:8152/logs/predictions_dev.table
+  five_sec: http://185.5.248.212:8252/logs/predictions_dev2.table
   minute_hour: http://185.5.248.212:8150/logs/predictions_dev.table
 entry_threshold: 3.0e-05
 exit_threshold: 3.0e-05
 fee_pct: 7.5e-06
+mae_stop_enabled: true  # Включение авто-паузы при MAE > threshold
+mae_stop_threshold: 12.0  # Порог MAE для остановки
+stop_loss_pct: 0.01  # Процент стоп-лосса от buy_price (например, 1%)
 poll_intervals:
   1h: 60
   1m: 10
@@ -16,7 +19,7 @@ ui:
   default_interval: 5s
   logs_interval: 5s
   logs_page_size: 100
-env: dev
+env: dev2
 ports:
   prod:
     simulation: 8060
@@ -26,3 +29,8 @@ ports:
     simulation: 8160
     logs: 8161
     session_manager: 8162
+  dev2:
+    simulation: 8260
+    logs: 8261
+    session_manager: 8262
+

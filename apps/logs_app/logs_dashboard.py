@@ -9,9 +9,9 @@ import os
 import csv
 from datetime import datetime
 try:
-    from zoneinfo import ZoneInfo  # Python 3.9+
+    from zoneinfo import ZoneInfo
 except ImportError:
-    from backports.zoneinfo import ZoneInfo  # Python <3.9
+    from backports.zoneinfo import ZoneInfo
 import urllib.parse
 import tempfile
 import shutil
@@ -84,7 +84,7 @@ class LogsDashboard:
         return html.Div([
             dcc.Location(id='url', refresh=False),
             dcc.Store(id='url-store'),
-            dcc.Store(id='page-size-store', data=self.reload_config().get('ui', {}).get('logs_page_size', 25)),  # Добавляем Store для page_size
+            dcc.Store(id='page-size-store', data=self.reload_config().get('ui', {}).get('logs_page_size', 25)),
             html.Div(id='page-content', children=self.create_logs_layout())
         ])
 
@@ -119,7 +119,6 @@ class LogsDashboard:
     def create_file_content_layout(self, filename):
         config = self.reload_config()
         page_size = config.get('ui', {}).get('logs_page_size', 25)
-        # Извлекаем session_id из filename (simulation_{session_id}.csv)
         session_id = filename.replace('simulation_', '').replace('.csv', '')
         return html.Div([
             html.H1(f"Содержимое файла: {filename} (сессия {session_id})", className='text-3xl font-bold mb-6 text-center text-gray-800'),
@@ -147,52 +146,7 @@ class LogsDashboard:
             elif pathname.startswith('/logs/'):
                 filename = urllib.parse.unquote(pathname[len('/logs/'):])
                 return self.create_file_content_layout(filename)
-            return html.P("Страница не найдена", className='text-red-500')
-
-        @self.app.callback(
-            Output('file-table-container', 'children'),
-            [Input('log-update-interval', 'n_intervals'), Input('log-interval-dropdown', 'value')]
-        )
-        def update_file_table(n_intervals, logs_interval):
-            files = []
-            folder = 'simulations'
-            if os.path.exists(folder):
-                files = [f for f in os.listdir(folder) if f.endswith('.csv')]
-                files.sort(key=lambda f: os.path.getmtime(os.path.join(folder, f)), reverse=True)
-
-            if not files:
-                return html.P("Нет файлов логов", className='text-gray-500')
-
-            data = []
-            for filename in files:
-                filepath = os.path.join(folder, filename)
-                file_time = datetime.fromtimestamp(os.path.getmtime(filepath)).strftime('%Y-%m-%d %H:%M:%S')
-                session_id = filename.replace('simulation_', '').replace('.csv', '')
-                interval = session_id.split('_')[0]
-                data.append({
-                    'filename': filename,
-                    'session_id': session_id,
-                    'interval': interval,
-                    'modified': file_time,
-                    'link': f"[Открыть](/logs/{urllib.parse.quote(filename)})"
-                })
-
-            table = dash_table.DataTable(
-                id='file-table',
-                columns=[
-                    {'name': 'Имя файла', 'id': 'filename'},
-                    {'name': 'ID сессии', 'id': 'session_id'},
-                    {'name': 'Интервал', 'id': 'interval'},
-                    {'name': 'Дата изменения', 'id': 'modified'},
-                    {'name': 'Ссылка', 'id': 'link', 'presentation': 'markdown'}
-                ],
-                data=data,
-                style_table={'overflowX': 'auto'},
-                style_cell={'textAlign': 'left', 'padding': '5px'},
-                style_header={'fontWeight': 'bold', 'backgroundColor': '#f3f4f6'},
-                sort_action='native'
-            )
-            return table
+            return self.create_logs_layout()
 
         @self.app.callback(
             Output('file-content', 'children'),
@@ -236,7 +190,9 @@ class LogsDashboard:
                         {'name': 'Прогноз', 'id': 'predicted_price', 'type': 'numeric', 'format': {'specifier': '.2f'}},
                         {'name': 'Прогноз %', 'id': 'predicted_change_pct', 'type': 'numeric', 'format': {'specifier': '.2f'}},
                         {'name': 'Причина', 'id': 'reason'},
-                        {'name': 'Точность', 'id': 'prediction_accuracy'}
+                        {'name': 'Точность', 'id': 'prediction_accuracy'},
+                        {'name': 'MAE 10min', 'id': 'mae_10min', 'type': 'numeric', 'format': {'specifier': '.4f'}},
+                        {'name': 'Точность %', 'id': 'accuracy_pct', 'type': 'numeric', 'format': {'specifier': '.2f'}}
                     ]
 
                     content_table = dash_table.DataTable(
@@ -255,7 +211,7 @@ class LogsDashboard:
                         sort_action='native',
                         filter_action='native',
                         page_action='native',
-                        page_size=page_size or 25  # Используем page_size из page-size-store
+                        page_size=page_size or 25
                     )
 
                     return html.Div([

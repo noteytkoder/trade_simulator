@@ -49,6 +49,12 @@ class SessionManagerDashboard:
                     dcc.Input(id='new-exit-threshold-input', type='number', value=self.config['exit_threshold'], className='border rounded px-2 py-1 w-32'),
                     html.Label("Комиссия (%):", className='font-medium'),
                     dcc.Input(id='new-fee-input', type='number', value=self.config['fee_pct'], className='border rounded px-2 py-1 w-32'),
+                    html.Label("MAE стоп включен:", className='font-medium'),
+                    dcc.Checklist(id='new-mae-enabled', options=[{'label': '', 'value': 'enabled'}], value=['enabled'] if self.config['mae_stop_enabled'] else [], className='border rounded px-2 py-1'),
+                    html.Label("MAE порог:", className='font-medium'),
+                    dcc.Input(id='new-mae-threshold', type='number', value=self.config['mae_stop_threshold'], className='border rounded px-2 py-1 w-32'),
+                    html.Label("Стоп-лосс %:", className='font-medium'),
+                    dcc.Input(id='new-sl-pct', type='number', value=self.config['stop_loss_pct'], className='border rounded px-2 py-1 w-32'),
                     html.Label("Интервал:", className='font-medium'),
                     dcc.Dropdown(
                         id='new-interval-dropdown',
@@ -86,10 +92,15 @@ class SessionManagerDashboard:
                     'accuracy': f"{s['accuracy']:.2f}%",
                     'running': 'Запущена' if s['running'] else 'Остановлена',
                     'paused': 'На паузе' if s['paused'] else 'Активна',
+                    'auto_paused': 'Да' if s['auto_paused'] else 'Нет',
                     'start_time': s['start_time'],
                     'entry_threshold': f"{s['entry_threshold']:.2f}%",
                     'exit_threshold': f"{s['exit_threshold']:.2f}%",
                     'fee_pct': f"{s['fee_pct']:.2f}%",
+                    'mae_stop_enabled': 'Да' if s['mae_stop_enabled'] else 'Нет',
+                    'mae_stop_threshold': f"{s['mae_stop_threshold']:.2f}",
+                    'stop_loss_pct': f"{s['stop_loss_pct']:.2f}%",
+                    'last_mae': f"{s['last_mae']:.4f}" if s['last_mae'] is not None else "...",
                     'view_dashboard': f"[Открыть дашборд](http://127.0.0.1:{self.simulation_port}?session_id={s['session_id']})",
                     'view_log': f"[Открыть лог](http://127.0.0.1:{self.config['ports'][self.env]['logs']}/logs/simulation_{s['session_id']}.csv)",
                     'stop_action': '[Остановить]' if s['running'] else '—',
@@ -107,10 +118,15 @@ class SessionManagerDashboard:
                     {'name': 'Точность', 'id': 'accuracy'},
                     {'name': 'Статус', 'id': 'running'},
                     {'name': 'Пауза', 'id': 'paused'},
+                    {'name': 'Авто-пауза', 'id': 'auto_paused'},
                     {'name': 'Время старта', 'id': 'start_time'},
                     {'name': 'Порог входа', 'id': 'entry_threshold'},
                     {'name': 'Порог выхода', 'id': 'exit_threshold'},
                     {'name': 'Комиссия', 'id': 'fee_pct'},
+                    {'name': 'MAE стоп', 'id': 'mae_stop_enabled'},
+                    {'name': 'MAE порог', 'id': 'mae_stop_threshold'},
+                    {'name': 'Стоп-лосс %', 'id': 'stop_loss_pct'},
+                    {'name': 'Последний MAE', 'id': 'last_mae'},
                     {'name': 'Дашборд', 'id': 'view_dashboard', 'type': 'text', 'presentation': 'markdown'},
                     {'name': 'Лог', 'id': 'view_log', 'type': 'text', 'presentation': 'markdown'},
                     {'name': 'Стоп', 'id': 'stop_action', 'type': 'text', 'presentation': 'markdown'},
@@ -139,11 +155,13 @@ class SessionManagerDashboard:
             [Input('create-session-button', 'n_clicks')],
             [State('new-interval-dropdown', 'value'), State('new-balance-input', 'value'),
              State('new-entry-threshold-input', 'value'), State('new-exit-threshold-input', 'value'),
-             State('new-fee-input', 'value')]
+             State('new-fee-input', 'value'), State('new-mae-enabled', 'value'),
+             State('new-mae-threshold', 'value'), State('new-sl-pct', 'value')]
         )
-        def create_session(n_clicks, interval, balance, entry, exit_t, fee):
+        def create_session(n_clicks, interval, balance, entry, exit_t, fee, mae_enabled, mae_threshold, sl_pct):
             if n_clicks > 0:
-                session_id = self.manager.start_simulation(interval, balance, entry, exit_t, fee)
+                mae_enabled = 'enabled' in (mae_enabled or [])
+                session_id = self.manager.start_simulation(interval, balance, entry, exit_t, fee, mae_enabled, mae_threshold, sl_pct)
                 logger.info(f"Создана сессия {session_id} через форму. Экземпляр: {id(self.manager)}, simulations: {id(self.manager.simulations)}")
                 return 0
             return n_clicks

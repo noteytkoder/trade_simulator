@@ -19,7 +19,6 @@ class TradingDashboard:
         self.session_manager_port = self.config['ports'][self.env]['session_manager']
         self.auth_config = yaml.safe_load(open('auth.yaml', 'r'))
         self.manager = SimulationManager()
-        #logger.info(f"TradingDashboard использует SimulationManager, экземпляр: {id(self.manager)}, simulations: {id(self.manager.simulations)}")
         logger.setLevel(getattr(logging, self.config.get('log_level', 'INFO')))
         self.app = Dash(__name__, external_stylesheets=[
             'https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css'
@@ -60,9 +59,13 @@ class TradingDashboard:
                 html.P(id='session-current-balance', children="Баланс: 0.0", className='text-gray-700'),
                 html.P(id='session-profit', children="Прибыль: 0.0", className='text-gray-700'),
                 html.P(id='session-accuracy', children="Точность прогнозов: 0.0%", className='text-gray-700'),
+                html.P(id='session-mae', children="MAE 10min: ...", className='text-gray-700'),
             ]),
             html.Div(id='error-message', children="", className='text-red-500 mb-4'),
             dcc.Graph(id='balance-graph'),
+            dcc.Graph(id='profit-graph'),
+            dcc.Graph(id='accuracy-graph'),
+            dcc.Graph(id='mae-graph'),
             html.Button("Пауза/Возобновить", id='pause-button', className='bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600', disabled=True),
             dcc.Interval(id='interval-component', interval=2*1000, n_intervals=0)
         ])
@@ -80,7 +83,11 @@ class TradingDashboard:
                 Output('session-entry', 'children'),
                 Output('session-exit', 'children'),
                 Output('session-fee', 'children'),
+                Output('session-mae', 'children'),
                 Output('balance-graph', 'figure'),
+                Output('profit-graph', 'figure'),
+                Output('accuracy-graph', 'figure'),
+                Output('mae-graph', 'figure'),
                 Output('pause-button', 'disabled'),
                 Output('error-message', 'children')
             ],
@@ -105,6 +112,10 @@ class TradingDashboard:
                     "Порог входа: N/A",
                     "Порог выхода: N/A",
                     "Комиссия: N/A",
+                    "MAE 10min: ...",
+                    {'data': [], 'layout': {'title': 'Нет данных'}},
+                    {'data': [], 'layout': {'title': 'Нет данных'}},
+                    {'data': [], 'layout': {'title': 'Нет данных'}},
                     {'data': [], 'layout': {'title': 'Нет данных'}},
                     True,
                     "Выберите сессию"
@@ -125,6 +136,10 @@ class TradingDashboard:
                     "Порог входа: N/A",
                     "Порог выхода: N/A",
                     "Комиссия: N/A",
+                    "MAE 10min: ...",
+                    {'data': [], 'layout': {'title': f'Сессия {session_id} не найдена'}},
+                    {'data': [], 'layout': {'title': f'Сессия {session_id} не найдена'}},
+                    {'data': [], 'layout': {'title': f'Сессия {session_id} не найдена'}},
                     {'data': [], 'layout': {'title': f'Сессия {session_id} не найдена'}},
                     True,
                     "Сессия не найдена в памяти"
@@ -133,7 +148,11 @@ class TradingDashboard:
             logger.info(f"Сессия {session_id} подгружена успешно: параметры {sim.metadata}, данные {len(sim.trade_log)} записей")
             balance_series = sim.get_balance_series()
             balance_series = sorted(balance_series, key=lambda t: datetime.strptime(t[0], '%Y-%m-%d %H:%M:%S'))
-            figure = {
+            profit_series = sim.get_profit_series()
+            accuracy_series = sim.get_accuracy_series()
+            mae_series = sim.get_mae_series()
+
+            balance_fig = {
                 'data': [
                     {
                         'x': [t[0] for t in balance_series],
@@ -146,9 +165,65 @@ class TradingDashboard:
                 'layout': {
                     'title': f'Баланс ({interval}, сессия {session_id})',
                     'xaxis': {'title': 'Время'},
-                    'yaxis': {'title': 'Баланс'}
+                    'yaxis': {'title': 'Баланс'},
+                    'height': 400
                 }
             }
+
+            profit_fig = {
+                'data': [
+                    {
+                        'x': [t for t, p in profit_series],
+                        'y': [p for t, p in profit_series],
+                        'type': 'bar',
+                        'name': 'Прибыль',
+                        'marker': {'color': ['green' if p > 0 else 'red' for t, p in profit_series]}
+                    }
+                ],
+                'layout': {
+                    'title': f'Прибыль/Убыток ({interval}, сессия {session_id})',
+                    'xaxis': {'title': 'Время'},
+                    'yaxis': {'title': 'Прибыль'},
+                    'height': 300
+                }
+            }
+
+            accuracy_fig = {
+                'data': [
+                    {
+                        'x': [t for t, a in accuracy_series],
+                        'y': [a for t, a in accuracy_series],
+                        'type': 'line',
+                        'name': 'Точность',
+                        'line': {'color': '#ff7f0e'}
+                    }
+                ],
+                'layout': {
+                    'title': f'Точность прогнозов (%) ({interval}, сессия {session_id})',
+                    'xaxis': {'title': 'Время'},
+                    'yaxis': {'title': 'Точность (%)'},
+                    'height': 300
+                }
+            }
+
+            mae_fig = {
+                'data': [
+                    {
+                        'x': [t for t, m in mae_series],
+                        'y': [m for t, m in mae_series],
+                        'type': 'line',
+                        'name': 'MAE',
+                        'line': {'color': '#2ca02c'}
+                    }
+                ],
+                'layout': {
+                    'title': f'MAE 10min ({interval}, сессия {session_id})',
+                    'xaxis': {'title': 'Время'},
+                    'yaxis': {'title': 'MAE'},
+                    'height': 300
+                }
+            }
+
             return (
                 f"Текущий курс BTCUSDT: {current_price:.2f}",
                 f"BTC: {sim.get_current_btc():.6f}",
@@ -160,7 +235,11 @@ class TradingDashboard:
                 f"Порог входа: {sim.entry_threshold:.2f}%",
                 f"Порог выхода: {sim.exit_threshold:.2f}%",
                 f"Комиссия: {sim.fee_pct:.2f}%",
-                figure,
+                f"MAE 10min: {sim.get_last_mae():.4f}" if sim.get_last_mae() is not None else "MAE 10min: ...",
+                balance_fig,
+                profit_fig,
+                accuracy_fig,
+                mae_fig,
                 False,
                 ""
             )
