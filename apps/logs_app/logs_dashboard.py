@@ -149,6 +149,42 @@ class LogsDashboard:
             return self.create_logs_layout()
 
         @self.app.callback(
+            Output('file-table-container', 'children'),
+            [Input('log-update-interval', 'n_intervals'), Input('log-interval-dropdown', 'value')]
+        )
+        def update_file_table(n_intervals, selected_interval):
+            try:
+                files = [f for f in os.listdir('simulations') if f.endswith('.csv') and f.startswith(f'simulation_{selected_interval}_')]
+                logger.info(f"Найдено файлов для интервала {selected_interval}: {files}")
+                files.sort(key=lambda x: os.path.getmtime(os.path.join('simulations', x)), reverse=True)
+                data = [
+                    {
+                        'filename': f,
+                        'mtime': datetime.fromtimestamp(os.path.getmtime(os.path.join('simulations', f))).strftime('%Y-%m-%d %H:%M:%S'),
+                        'size': f"{os.path.getsize(os.path.join('simulations', f)) / 1024:.2f} KB",
+                        'view': f'[Открыть](logs/{urllib.parse.quote(f)})',
+                    } for f in files
+                ]
+                if not data:
+                    return html.P(f"Нет логов для интервала {selected_interval}.", className='text-red-500')
+                return dash_table.DataTable(
+                    id='file-table',
+                    columns=[
+                        {'name': 'Файл', 'id': 'filename'},
+                        {'name': 'Дата изменения', 'id': 'mtime'},
+                        {'name': 'Размер', 'id': 'size'},
+                        {'name': 'Просмотр', 'id': 'view', 'type': 'text', 'presentation': 'markdown'},
+                    ],
+                    data=data,
+                    style_table={'overflowX': 'auto'},
+                    style_cell={'textAlign': 'left', 'padding': '5px'},
+                    style_header={'fontWeight': 'bold', 'backgroundColor': '#f3f4f6'},
+                    sort_action='native'
+                )
+            except Exception as e:
+                logger.error(f"Ошибка при обновлении таблицы файлов: {e}")
+                return html.P(f"Ошибка при загрузке файлов: {e}", className='text-red-500')
+        @self.app.callback(
             Output('file-content', 'children'),
             [Input('url', 'pathname'), Input('page-size-store', 'data')]
         )
