@@ -7,9 +7,9 @@ endpoints:
 entry_threshold: 3.0e-05
 exit_threshold: 3.0e-05
 fee_pct: 7.5e-06
-mae_stop_enabled: true  # Включение авто-паузы при MAE > threshold
-mae_stop_threshold: 12.0  # Порог MAE для остановки
-stop_loss_pct: 0.01  # Процент стоп-лосса от buy_price (например, 1%)
+mae_stop_enabled: true
+mae_stop_threshold: 12.0
+stop_loss_pct: 0.01
 poll_intervals:
   1h: 60
   1m: 10
@@ -33,4 +33,3 @@ ports:
     simulation: 8260
     logs: 8261
     session_manager: 8262
-

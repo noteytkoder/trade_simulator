@@ -16,7 +16,7 @@ class SessionManagerDashboard:
         self.env = self.config.get('env', 'prod')
         self.simulation_port = self.config['ports'][self.env]['simulation']
         self.manager = SimulationManager()
-        logger.info(f"SessionManager использует SimulationManager, экземпляр: {id(self.manager)}, simulations: {id(self.manager.simulations)}")
+        # logger.info(f"SessionManager использует SimulationManager, экземпляр: {id(self.manager)}, simulations: {id(self.manager.simulations)}")
         logger.setLevel(getattr(logging, self.config.get('log_level', 'INFO')))
         self.app = Dash(__name__, external_stylesheets=[
             'https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css'
@@ -119,14 +119,14 @@ class SessionManagerDashboard:
                     {'name': 'Статус', 'id': 'running'},
                     {'name': 'Пауза', 'id': 'paused'},
                     {'name': 'Авто-пауза', 'id': 'auto_paused'},
-                    {'name': 'Время старта', 'id': 'start_time'},
-                    {'name': 'Порог входа', 'id': 'entry_threshold'},
-                    {'name': 'Порог выхода', 'id': 'exit_threshold'},
-                    {'name': 'Комиссия', 'id': 'fee_pct'},
-                    {'name': 'MAE стоп', 'id': 'mae_stop_enabled'},
-                    {'name': 'MAE порог', 'id': 'mae_stop_threshold'},
-                    {'name': 'Стоп-лосс %', 'id': 'stop_loss_pct'},
-                    {'name': 'Последний MAE', 'id': 'last_mae'},
+                    # {'name': 'Время старта', 'id': 'start_time'},
+                    # {'name': 'Порог входа', 'id': 'entry_threshold'},
+                    # {'name': 'Порог выхода', 'id': 'exit_threshold'},
+                    # {'name': 'Комиссия', 'id': 'fee_pct'},
+                    # {'name': 'MAE стоп', 'id': 'mae_stop_enabled'},
+                    # {'name': 'MAE порог', 'id': 'mae_stop_threshold'},
+                    # {'name': 'Стоп-лосс %', 'id': 'stop_loss_pct'},
+                    # {'name': 'Последний MAE', 'id': 'last_mae'},
                     {'name': 'Дашборд', 'id': 'view_dashboard', 'type': 'text', 'presentation': 'markdown'},
                     {'name': 'Лог', 'id': 'view_log', 'type': 'text', 'presentation': 'markdown'},
                     {'name': 'Стоп', 'id': 'stop_action', 'type': 'text', 'presentation': 'markdown'},

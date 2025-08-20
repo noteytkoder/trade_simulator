@@ -54,6 +54,7 @@ class TradingDashboard:
                 html.P(id='session-entry', children="Порог входа: N/A", className='text-gray-700'),
                 html.P(id='session-exit', children="Порог выхода: N/A", className='text-gray-700'),
                 html.P(id='session-fee', children="Комиссия: N/A", className='text-gray-700'),
+                html.Hr(className='my-4'),  # Разделитель
                 html.P(id='session-price', children="Текущий курс BTCUSDT: 0.0", className='text-gray-700'),
                 html.P(id='session-btc', children="BTC: 0.0", className='text-gray-700'),
                 html.P(id='session-current-balance', children="Баланс: 0.0", className='text-gray-700'),
@@ -151,7 +152,7 @@ class TradingDashboard:
             profit_series = sim.get_profit_series()
             accuracy_series = sim.get_accuracy_series()
             mae_series = sim.get_mae_series()
-
+            
             balance_fig = {
                 'data': [
                     {
@@ -163,10 +164,16 @@ class TradingDashboard:
                     }
                 ],
                 'layout': {
-                    'title': f'Баланс ({interval}, сессия {session_id})',
+                    'title': {
+                        'text': f'График баланса',
+                        'font': {'size': 20, 'family': 'Arial', 'weight': 'bold'},
+                        #'x': 0.5,  # Центрировать заголовок
+                        'xanchor': 'center'
+                    },
                     'xaxis': {'title': 'Время'},
                     'yaxis': {'title': 'Баланс'},
-                    'height': 400
+                    'height': 400,
+                    'margin': {'t': 50}  # Увеличить отступ сверху для заголовка
                 }
             }
 
@@ -181,10 +188,16 @@ class TradingDashboard:
                     }
                 ],
                 'layout': {
-                    'title': f'Прибыль/Убыток ({interval}, сессия {session_id})',
+                    'title': {
+                        'text': f'График прибыли/убытков',
+                        'font': {'size': 20, 'family': 'Arial', 'weight': 'bold'},
+                        #'x': 0.5,
+                        'xanchor': 'center'
+                    },
                     'xaxis': {'title': 'Время'},
                     'yaxis': {'title': 'Прибыль'},
-                    'height': 300
+                    'height': 300,
+                    'margin': {'t': 50}
                 }
             }
 
@@ -199,10 +212,16 @@ class TradingDashboard:
                     }
                 ],
                 'layout': {
-                    'title': f'Точность прогнозов (%) ({interval}, сессия {session_id})',
+                    'title': {
+                        'text': f'График точности прогнозов (%)',
+                        'font': {'size': 20, 'family': 'Arial', 'weight': 'bold'},
+                        'x': 0.5,
+                        'xanchor': 'center'
+                    },
                     'xaxis': {'title': 'Время'},
                     'yaxis': {'title': 'Точность (%)'},
-                    'height': 300
+                    'height': 300,
+                    'margin': {'t': 50}
                 }
             }
 
@@ -217,10 +236,16 @@ class TradingDashboard:
                     }
                 ],
                 'layout': {
-                    'title': f'MAE 10min ({interval}, сессия {session_id})',
+                    'title': {
+                        'text': f'График MAE за 10 мин',
+                        'font': {'size': 20, 'family': 'Arial', 'weight': 'bold'},
+                        'x': 0.5,
+                        'xanchor': 'center'
+                    },
                     'xaxis': {'title': 'Время'},
                     'yaxis': {'title': 'MAE'},
-                    'height': 300
+                    'height': 300,
+                    'margin': {'t': 50}
                 }
             }
 
