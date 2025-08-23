@@ -6,6 +6,7 @@ from trading.simulator import TradeSimulator
 from utils.parser import TableParser
 from utils.logger import setup_logger
 import logging
+from typing import List, Dict
 
 logger = setup_logger('simulation_manager')
 
@@ -124,7 +125,7 @@ class SimulationManager:
                 logger.warning(f"Сессия {session_id} не найдена в памяти для {interval}. Экземпляр: {id(self)}, simulations: {id(self.simulations)}, содержание: {self.simulations.get(interval, 'пусто')}")
             return sim
 
-    def list_sessions(self) -> list[dict]:
+    def list_sessions(self) -> List[Dict]:
         sessions = []
         with self.lock:
             for interval, sess_dict in self.simulations.items():

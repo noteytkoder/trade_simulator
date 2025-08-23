@@ -46,7 +46,7 @@ class TradingDashboard:
     def create_main_layout(self):
         return html.Div([
             html.H1("Симулятор торговли", className='text-3xl font-bold mb-6 text-center text-gray-800'),
-            html.A('Назад к менеджеру сессий', href=f"http://127.0.0.1:{self.session_manager_port}", className='text-blue-500 hover:underline mb-4 inline-block'),
+            html.A('Назад к менеджеру сессий', href=f"http://185.5.248.212:{self.session_manager_port}", className='text-blue-500 hover:underline mb-4 inline-block'),
             html.Div(id='session-params', className='mb-6 bg-white p-4 rounded-lg shadow-md', children=[
                 html.H3("Параметры сессии", className='text-xl font-semibold mb-4'),
                 html.P(id='session-interval', children="Интервал: N/A", className='text-gray-700'),
@@ -103,7 +103,7 @@ class TradingDashboard:
             if session_id is None:
                 logger.warning("session_id не найден в URL, показываем дефолт")
                 return (
-                    f"Текущий курс BTCUSDT: {current_price:.2f}",
+                    f"Текущий курс BTCUSDT: {current_price:.4f}",
                     "BTC: 0.0",
                     "Баланс: 0.0",
                     "Прибыль: 0.0",
@@ -127,7 +127,7 @@ class TradingDashboard:
             if not sim:
                 logger.warning(f"Сессия {session_id} не найдена в памяти, показываем дефолт")
                 return (
-                    f"Текущий курс BTCUSDT: {current_price:.2f}",
+                    f"Текущий курс BTCUSDT: {current_price:.4f}",
                     "BTC: 0.0",
                     "Баланс: 0.0",
                     "Прибыль: 0.0",
@@ -250,16 +250,16 @@ class TradingDashboard:
             }
 
             return (
-                f"Текущий курс BTCUSDT: {current_price:.2f}",
+                f"Текущий курс BTCUSDT: {current_price:.4f}",
                 f"BTC: {sim.get_current_btc():.6f}",
-                f"Баланс: {sim.get_current_balance():.2f}",
-                f"Прибыль: {sim.get_total_profit():.2f}",
+                f"Баланс: {sim.get_current_balance():.4f}",
+                f"Прибыль: {sim.get_total_profit():.6f}",
                 f"Точность прогнозов: {sim.get_prediction_accuracy():.2f}%",
                 f"Интервал: {sim.interval}",
-                f"Начальный баланс: {sim.metadata['start_balance']:.2f}",
-                f"Порог входа: {sim.entry_threshold:.2f}%",
-                f"Порог выхода: {sim.exit_threshold:.2f}%",
-                f"Комиссия: {sim.fee_pct:.2f}%",
+                f"Начальный баланс: {sim.metadata['start_balance']:.6f}",
+                f"Порог входа: {sim.entry_threshold:.6f}%",
+                f"Порог выхода: {sim.exit_threshold:.6f}%",
+                f"Комиссия: {sim.fee_pct:.6f}%",
                 f"MAE 10min: {sim.get_last_mae():.4f}" if sim.get_last_mae() is not None else "MAE 10min: ...",
                 balance_fig,
                 profit_fig,
