@@ -80,8 +80,10 @@ class SessionManagerDashboard:
             [Input('interval-component', 'n_intervals')]
         )
         def update_sessions_table(n_intervals):
+            ip = "185.5.248.212"
+            ip = "127.0.0.1"
             sessions = self.manager.list_sessions()
-            logger.info(f"Обновление таблицы сессий: найдено {len(sessions)} сессий. Экземпляр: {id(self.manager)}, simulations: {id(self.manager.simulations)}")
+            # logger.info(f"Обновление таблицы сессий: найдено {len(sessions)} сессий. Экземпляр: {id(self.manager)}, simulations: {id(self.manager.simulations)}")
             data = [
                 {
                     'interval': s['interval'],
@@ -101,8 +103,8 @@ class SessionManagerDashboard:
                     'mae_stop_threshold': f"{s['mae_stop_threshold']:.6f}",
                     'stop_loss_pct': f"{s['stop_loss_pct']:.6f}%",
                     'last_mae': f"{s['last_mae']:.4f}" if s['last_mae'] is not None else "...",
-                    'view_dashboard': f"[Открыть дашборд](http://185.5.248.212:{self.simulation_port}?session_id={s['session_id']})",
-                    'view_log': f"[Открыть лог](http://185.5.248.212:{self.config['ports'][self.env]['logs']}/logs/simulation_{s['session_id']}.csv)",
+                    'view_dashboard': f"[Открыть дашборд](http://{ip}:{self.simulation_port}?session_id={s['session_id']})",
+                    'view_log': f"[Открыть лог](http://{ip}:{self.config['ports'][self.env]['logs']}/logs/simulation_{s['session_id']}.csv)",
                     'stop_action': '[Остановить]' if s['running'] else '—',
                     'pause_action': '[Пауза]' if s['running'] and not s['paused'] else '[Возобновить]' if s['running'] and s['paused'] else '—'
                 } for s in sessions

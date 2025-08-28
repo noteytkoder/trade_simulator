@@ -119,10 +119,10 @@ class SimulationManager:
     def get_simulator(self, interval, session_id):
         with self.lock:
             sim = self.simulations.get(interval, {}).get(session_id, {}).get("sim")
-            if sim:
-                logger.info(f"Сессия {session_id} подгружена из памяти для {interval}. Параметры: {sim.metadata}. Экземпляр: {id(self)}, simulations: {id(self.simulations)}, содержание: {self.simulations.get(interval, 'пусто')}")
-            else:
-                logger.warning(f"Сессия {session_id} не найдена в памяти для {interval}. Экземпляр: {id(self)}, simulations: {id(self.simulations)}, содержание: {self.simulations.get(interval, 'пусто')}")
+            # if sim:
+            #     logger.info(f"Сессия {session_id} подгружена из памяти для {interval}. Параметры: {sim.metadata}. Экземпляр: {id(self)}, simulations: {id(self.simulations)}, содержание: {self.simulations.get(interval, 'пусто')}")
+            # else:
+            #     logger.warning(f"Сессия {session_id} не найдена в памяти для {interval}. Экземпляр: {id(self)}, simulations: {id(self.simulations)}, содержание: {self.simulations.get(interval, 'пусто')}")
             return sim
 
     def list_sessions(self) -> List[Dict]:
@@ -150,7 +150,7 @@ class SimulationManager:
                         "auto_paused": sim.auto_paused,
                         "last_mae": sim.get_last_mae()
                     })
-            logger.info(f"Список сессий возвращён: {len(sessions)} активных сессий. Экземпляр: {id(self)}, simulations: {id(self.simulations)}, хранение: {self.simulations.keys()}")
+            # logger.info(f"Список сессий возвращён: {len(sessions)} активных сессий. Экземпляр: {id(self)}, simulations: {id(self.simulations)}, хранение: {self.simulations.keys()}")
         return sessions
 
     def get_current_price(self):

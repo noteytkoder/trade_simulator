@@ -97,7 +97,7 @@ class TradingDashboard:
         def update_dashboard(n_intervals, search):
             query_params = parse_qs(search.lstrip('?'))
             session_id = query_params.get('session_id', [None])[0]
-            logger.info(f"Попытка подгрузки сессии {session_id} из URL {search}. Экземпляр SimulationManager: {id(self.manager)}, simulations: {id(self.manager.simulations)}")
+            logger.debug(f"Попытка подгрузки сессии {session_id} из URL {search}. Экземпляр SimulationManager: {id(self.manager)}, simulations: {id(self.manager.simulations)}")
             current_price = self.manager.get_current_price() or 0.0
 
             if session_id is None:
