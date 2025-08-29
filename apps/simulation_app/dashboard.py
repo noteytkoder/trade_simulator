@@ -146,7 +146,7 @@ class TradingDashboard:
                     "Сессия не найдена в памяти"
                 )
 
-            logger.info(f"Сессия {session_id} подгружена успешно: параметры {sim.metadata}, данные {len(sim.trade_log)} записей")
+            logger.debug(f"Сессия {session_id} подгружена успешно: параметры {sim.metadata}, данные {len(sim.trade_log)} записей")
             balance_series = sim.get_balance_series()
             balance_series = sorted(balance_series, key=lambda t: datetime.strptime(t[0], '%Y-%m-%d %H:%M:%S'))
             profit_series = sim.get_profit_series()

@@ -52,7 +52,7 @@ class TableParser:
             actual_price = float(cells[1].text.strip())
 
             predictions = {}
-            mae_10min = None
+            mae_10min = 0
 
             if interval == '5s':
                 pred_text = cells[2].text.strip().split('(')
@@ -70,8 +70,8 @@ class TableParser:
                 pred_time = time_match.group()
 
                 predictions['5s'] = (pred_value, change_pct, pred_time)
-                mae_text = cells[3].text.strip()
-                mae_10min = float(mae_text) if mae_text != "..." else None  # Обработка "..."
+                # mae_text = cells[3].text.strip()
+                # mae_10min = float(mae_text) if mae_text != "..." else None  # Обработка "..."
 
             else:
                 min_pred_text = cells[2].text.strip().split('(')
