@@ -2,8 +2,8 @@ auth:
   password: qwerty63
   username: admin
 endpoints:
-  #five_sec: http://127.0.0.1:8252/logs/predictions_dev2.table
-  five_sec: http://127.0.0.1:8152/logs/predictions_dev.table
+  five_sec: http://185.5.248.212:8252/logs/predictions_dev2.table
+  # five_sec: http://127.0.0.1:8152/logs/predictions_dev.table
   minute_hour: http://185.5.248.212:8150/logs/predictions_dev.table
 entry_threshold: 0.003
 exit_threshold: 0.003

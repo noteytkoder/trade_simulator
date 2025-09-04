@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Tuple
 from utils.logger import setup_logger
 from utils.csv_writer import save_to_csv, update_csv_accuracy
@@ -15,7 +15,7 @@ class TradeSimulator:
     def __init__(self, start_balance: float, entry_threshold: float, exit_threshold: float,
                  fee_pct: float, interval: str, session_id: str,
                  mae_stop_enabled: bool = True, mae_stop_threshold: float = 12.0,
-                 stop_loss_pct: float = 0.01):
+                 stop_loss_pct: float = 0.01, max_hold_minutes: int = 1):
         self.balance = start_balance
         self.btc = 0.0
         self.buy_price = 0.0
@@ -56,24 +56,26 @@ class TradeSimulator:
             'start_time': self.start_time,
             'mae_stop_enabled': self.mae_stop_enabled,
             'mae_stop_threshold': self.mae_stop_threshold,
-            'stop_loss_pct': self.stop_loss_pct
+            'stop_loss_pct': self.stop_loss_pct,
+            'max_hold_minutes': max_hold_minutes
         }
 
         self.correct_predictions = 0
         self.total_predictions = 0
         self.last_tick = None
         self.pending_log = None
+        self.entry_time = None
+        self.max_hold_minutes = max_hold_minutes
 
         logger.info(
             f"Инициализация симулятора ({self.interval}, сессия {self.session_id}): "
             f"баланс={self.balance:.2f}, вход={self.entry_threshold:.6f}%, "
             f"выход={self.exit_threshold:.6f}%, комиссия={self.fee_pct:.6f}%, "
             f"MAE стоп={self.mae_stop_enabled}, MAE порог={self.mae_stop_threshold}, "
-            f"стоп-лосс={self.stop_loss_pct * 100:.2f}%"
+            f"стоп-лосс={self.stop_loss_pct * 100:.2f}%, макс. удержание={self.max_hold_minutes} мин"
         )
 
     def calculate_fee(self, amount: float) -> float:
-        """Возвращает комиссию в USDT исходя из процента"""
         return amount * (self.fee_pct / 100)
 
     def check_prediction_accuracy(self, last_tick: Dict, current_price: float, operation: str) -> bool:
@@ -98,7 +100,7 @@ class TradeSimulator:
     def monitor_stop_loss(self, tick: Dict):
         if self.btc > 0 and self.stop_loss_price is not None:
             price = tick['actual_price']
-            # Trailing stop-loss: обновляем, если цена выросла
+            # Trailing stop-loss
             new_sl = price * (1 - self.stop_loss_pct)
             self.stop_loss_price = max(self.stop_loss_price, new_sl)
             logger.debug(f"[{self.session_id}] Мониторинг стоп-лосс: price={price:.2f}, sl_price={self.stop_loss_price:.2f}")
@@ -136,7 +138,6 @@ class TradeSimulator:
         predicted_price, predicted_change_pct, forecast_time = prediction
         logger.debug(f"[{self.session_id}] Предсказание: price={predicted_price:.2f}, change={predicted_change_pct:.6f}%, time={forecast_time}")
 
-        # Если позиции нет — проверяем вход
         if self.btc == 0:
             if predicted_change_pct >= self.entry_threshold:
                 logger.info(f"[{self.session_id}] Сигнал BUY: change={predicted_change_pct:.6f}% >= {self.entry_threshold:.6f}%")
@@ -144,16 +145,24 @@ class TradeSimulator:
             else:
                 logger.debug(f"[{self.session_id}] Нет BUY: change={predicted_change_pct:.6f}% < {self.entry_threshold:.6f}%")
         else:
-            # Если позиция открыта — проверяем условия выхода
             current_profit = (price - self.buy_price) / self.buy_price * 100
             sell_reason = None
 
+            # 1. Фиксация прибыли
             if current_profit >= self.exit_threshold:
                 sell_reason = "Выход: прибыль >= порога"
+            # 2. Прогноз стал отрицательным
             elif predicted_change_pct < 0:
                 sell_reason = "Выход: прогноз стал отрицательным"
+            # 3. Сильный убыток
             elif current_profit <= -self.stop_loss_pct:
                 sell_reason = "Выход: стоп-лосс"
+            # 4. Удержание дольше max_hold_minutes и убыток
+            elif self.entry_time and datetime.now(ZoneInfo("Europe/Moscow")) - self.entry_time > timedelta(minutes=self.max_hold_minutes) and current_profit < 0:
+                sell_reason = f"Выход: удержание > {self.max_hold_minutes} мин и убыток"
+            # 5. Высокая MAE и позиция в убытке
+            elif self.last_mae is not None and self.last_mae > self.mae_stop_threshold and current_profit < 0:
+                sell_reason = f"Выход: высокая MAE {self.last_mae:.4f} и убыток"
 
             logger.info(f"[{self.session_id}] Решение: current_profit={current_profit:.6f}%, pred_change={predicted_change_pct:.6f}%, decision={sell_reason or 'hold'}")
 
@@ -161,7 +170,6 @@ class TradeSimulator:
                 self.sell(timestamp, price, predicted_price, predicted_change_pct, reason=sell_reason)
 
         self.last_tick = tick
-
 
     def buy(self, timestamp: str, price: float, predicted_price: float, predicted_change_pct: float):
         if self.balance <= 0:
@@ -175,6 +183,7 @@ class TradeSimulator:
         self.cost_basis = self.balance
         self.balance = 0.0
         self.set_stop_loss()
+        self.entry_time = datetime.now(ZoneInfo("Europe/Moscow"))
 
         buy_accuracy = None
         if self.last_tick:
@@ -249,6 +258,7 @@ class TradeSimulator:
         self.cost_basis = 0.0
         self.pending_log = None
         self.stop_loss_price = None
+        self.entry_time = None
 
     def update_session(self):
         if not self.trade_log:
