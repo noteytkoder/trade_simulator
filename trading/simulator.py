@@ -14,8 +14,8 @@ logger.setLevel('DEBUG')  # Для детальной отладки
 class TradeSimulator:
     def __init__(self, start_balance: float, entry_threshold: float, exit_threshold: float,
                  fee_pct: float, interval: str, session_id: str,
-                 mae_stop_enabled: bool = True, mae_stop_threshold: float = 12.0,
-                 stop_loss_pct: float = 0.01, max_hold_minutes: int = 1):
+                 mae_stop_enabled: bool = False, mae_stop_threshold: float = 12.0,
+                 stop_loss_pct: float = 0.01, max_hold_minutes: int = 1, max_hold_seconds: int = 5):
         self.balance = start_balance
         self.btc = 0.0
         self.buy_price = 0.0
@@ -57,7 +57,8 @@ class TradeSimulator:
             'mae_stop_enabled': self.mae_stop_enabled,
             'mae_stop_threshold': self.mae_stop_threshold,
             'stop_loss_pct': self.stop_loss_pct,
-            'max_hold_minutes': max_hold_minutes
+            'max_hold_minutes': max_hold_minutes,
+            'max_hold_seconds': max_hold_seconds
         }
 
         self.correct_predictions = 0
@@ -66,13 +67,14 @@ class TradeSimulator:
         self.pending_log = None
         self.entry_time = None
         self.max_hold_minutes = max_hold_minutes
+        self.max_hold_seconds = max_hold_seconds
 
         logger.info(
             f"Инициализация симулятора ({self.interval}, сессия {self.session_id}): "
             f"баланс={self.balance:.2f}, вход={self.entry_threshold:.6f}%, "
             f"выход={self.exit_threshold:.6f}%, комиссия={self.fee_pct:.6f}%, "
             f"MAE стоп={self.mae_stop_enabled}, MAE порог={self.mae_stop_threshold}, "
-            f"стоп-лосс={self.stop_loss_pct * 100:.2f}%, макс. удержание={self.max_hold_minutes} мин"
+            f"стоп-лосс={self.stop_loss_pct * 100:.2f}%, макс. удержание={self.max_hold_minutes} мин / {self.max_hold_seconds} сек"
         )
 
     def calculate_fee(self, amount: float) -> float:
@@ -100,7 +102,6 @@ class TradeSimulator:
     def monitor_stop_loss(self, tick: Dict):
         if self.btc > 0 and self.stop_loss_price is not None:
             price = tick['actual_price']
-            # Trailing stop-loss
             new_sl = price * (1 - self.stop_loss_pct)
             self.stop_loss_price = max(self.stop_loss_price, new_sl)
             logger.debug(f"[{self.session_id}] Мониторинг стоп-лосс: price={price:.2f}, sl_price={self.stop_loss_price:.2f}")
@@ -148,19 +149,19 @@ class TradeSimulator:
             current_profit = (price - self.buy_price) / self.buy_price * 100
             sell_reason = None
 
-            # 1. Фиксация прибыли
             if current_profit >= self.exit_threshold:
                 sell_reason = "Выход: прибыль >= порога"
-            # 2. Прогноз стал отрицательным
             elif predicted_change_pct < 0:
                 sell_reason = "Выход: прогноз стал отрицательным"
-            # 3. Сильный убыток
             elif current_profit <= -self.stop_loss_pct:
                 sell_reason = "Выход: стоп-лосс"
-            # 4. Удержание дольше max_hold_minutes и убыток
-            elif self.entry_time and datetime.now(ZoneInfo("Europe/Moscow")) - self.entry_time > timedelta(minutes=self.max_hold_minutes) and current_profit < 0:
-                sell_reason = f"Выход: удержание > {self.max_hold_minutes} мин и убыток"
-            # 5. Высокая MAE и позиция в убытке
+            elif self.entry_time:
+                now = datetime.now(ZoneInfo("Europe/Moscow"))
+                hold_time = now - self.entry_time
+                if self.interval == '5s' and hold_time.total_seconds() > self.max_hold_seconds and current_profit < 0:
+                    sell_reason = f"Выход: удержание > {self.max_hold_seconds} сек и убыток"
+                elif self.interval == '1m' and hold_time > timedelta(minutes=self.max_hold_minutes) and current_profit < 0:
+                    sell_reason = f"Выход: удержание > {self.max_hold_minutes} мин и убыток"
             elif self.last_mae is not None and self.last_mae > self.mae_stop_threshold and current_profit < 0:
                 sell_reason = f"Выход: высокая MAE {self.last_mae:.4f} и убыток"
 
