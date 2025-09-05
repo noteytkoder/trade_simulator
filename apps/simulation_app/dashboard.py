@@ -114,10 +114,10 @@ class TradingDashboard:
                     "Порог выхода: N/A",
                     "Комиссия: N/A",
                     "MAE 10min: ...",
-                    {'data': [], 'layout': {'title': 'Нет данных'}},
-                    {'data': [], 'layout': {'title': 'Нет данных'}},
-                    {'data': [], 'layout': {'title': 'Нет данных'}},
-                    {'data': [], 'layout': {'title': 'Нет данных'}},
+                    {'data': [], 'layout': {'title': 'Нет данных', 'uirevision': 'constant'}},
+                    {'data': [], 'layout': {'title': 'Нет данных', 'uirevision': 'constant'}},
+                    {'data': [], 'layout': {'title': 'Нет данных', 'uirevision': 'constant'}},
+                    {'data': [], 'layout': {'title': 'Нет данных', 'uirevision': 'constant'}},
                     True,
                     "Выберите сессию"
                 )
@@ -138,10 +138,10 @@ class TradingDashboard:
                     "Порог выхода: N/A",
                     "Комиссия: N/A",
                     "MAE 10min: ...",
-                    {'data': [], 'layout': {'title': f'Сессия {session_id} не найдена'}},
-                    {'data': [], 'layout': {'title': f'Сессия {session_id} не найдена'}},
-                    {'data': [], 'layout': {'title': f'Сессия {session_id} не найдена'}},
-                    {'data': [], 'layout': {'title': f'Сессия {session_id} не найдена'}},
+                    {'data': [], 'layout': {'title': f'Сессия {session_id} не найдена', 'uirevision': 'constant'}},
+                    {'data': [], 'layout': {'title': f'Сессия {session_id} не найдена', 'uirevision': 'constant'}},
+                    {'data': [], 'layout': {'title': f'Сессия {session_id} не найдена', 'uirevision': 'constant'}},
+                    {'data': [], 'layout': {'title': f'Сессия {session_id} не найдена', 'uirevision': 'constant'}},
                     True,
                     "Сессия не найдена в памяти"
                 )
@@ -167,13 +167,13 @@ class TradingDashboard:
                     'title': {
                         'text': f'График баланса',
                         'font': {'size': 20, 'family': 'Arial', 'weight': 'bold'},
-                        #'x': 0.5,  # Центрировать заголовок
                         'xanchor': 'center'
                     },
-                    'xaxis': {'title': 'Время'},
-                    'yaxis': {'title': 'Баланс'},
+                    'xaxis': {'title': 'Время', 'autorange': True},
+                    'yaxis': {'title': 'Баланс', 'autorange': True},
                     'height': 400,
-                    'margin': {'t': 50}  # Увеличить отступ сверху для заголовка
+                    'margin': {'t': 50},
+                    'uirevision': 'constant'  # Сохраняет пользовательский зум и положение
                 }
             }
 
@@ -191,13 +191,13 @@ class TradingDashboard:
                     'title': {
                         'text': f'График прибыли/убытков',
                         'font': {'size': 20, 'family': 'Arial', 'weight': 'bold'},
-                        #'x': 0.5,
                         'xanchor': 'center'
                     },
-                    'xaxis': {'title': 'Время'},
-                    'yaxis': {'title': 'Прибыль'},
+                    'xaxis': {'title': 'Время', 'autorange': True},
+                    'yaxis': {'title': 'Прибыль', 'autorange': True},
                     'height': 300,
-                    'margin': {'t': 50}
+                    'margin': {'t': 50},
+                    'uirevision': 'constant'  # Сохраняет пользовательский зум и положение
                 }
             }
 
@@ -218,10 +218,11 @@ class TradingDashboard:
                         'x': 0.5,
                         'xanchor': 'center'
                     },
-                    'xaxis': {'title': 'Время'},
-                    'yaxis': {'title': 'Точность (%)'},
+                    'xaxis': {'title': 'Время', 'autorange': True},
+                    'yaxis': {'title': 'Точность (%)', 'autorange': True},
                     'height': 300,
-                    'margin': {'t': 50}
+                    'margin': {'t': 50},
+                    'uirevision': 'constant'  # Сохраняет пользовательский зум и положение
                 }
             }
 
@@ -242,10 +243,11 @@ class TradingDashboard:
                         'x': 0.5,
                         'xanchor': 'center'
                     },
-                    'xaxis': {'title': 'Время'},
-                    'yaxis': {'title': 'MAE'},
+                    'xaxis': {'title': 'Время', 'autorange': True},
+                    'yaxis': {'title': 'MAE', 'autorange': True},
                     'height': 300,
-                    'margin': {'t': 50}
+                    'margin': {'t': 50},
+                    'uirevision': 'constant'  # Сохраняет пользовательский зум и положение
                 }
             }
 
