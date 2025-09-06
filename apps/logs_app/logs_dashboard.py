@@ -164,7 +164,7 @@ class LogsDashboard:
                     {
                         'filename': f,
                         'mtime': datetime.fromtimestamp(os.path.getmtime(os.path.join('simulations', f))).strftime('%Y-%m-%d %H:%M:%S'),
-                        'size': f"{os.path.getsize(os.path.join('simulations', f)) / 1024:.2f} KB",
+                        'size': f"{os.path.getsize(os.path.join('simulations', f)) / 1024:.4f} KB",
                         'view': f'[Открыть](logs/{urllib.parse.quote(f)})',
                     } for f in files
                 ]
@@ -255,9 +255,9 @@ class LogsDashboard:
                             'Win rate (%)', 'Средняя точность прогноза (%)'
                         ],
                         'Значение': [
-                            f"{final_balance:.2f}", f"{total_fee:.2f}", f"{max_loss:.2f}",
-                            f"{max_profit:.2f}", f"{avg_profit:.2f}",
-                            f"{win_rate:.2f}", f"{avg_accuracy:.2f}"
+                            f"{final_balance:.4f}", f"{total_fee:.4f}", f"{max_loss:.4f}",
+                            f"{max_profit:.4f}", f"{avg_profit:.4f}",
+                            f"{win_rate:.4f}", f"{avg_accuracy:.4f}"
                         ]
                     }
                     metrics_table = dash_table.DataTable(
