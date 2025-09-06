@@ -33,3 +33,8 @@ ports:
     simulation: 8260
     logs: 8261
     session_manager: 8262
+  dev2:
+    simulation: 8360
+    logs: 8361
+    session_manager: 8362
+
