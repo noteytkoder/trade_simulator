@@ -81,7 +81,7 @@ class SessionManagerDashboard:
         )
         def update_sessions_table(n_intervals):
             ip = "185.5.248.212"
-            ip = "127.0.0.1"
+            #ip = "127.0.0.1"
             sessions = self.manager.list_sessions()
             # logger.info(f"Обновление таблицы сессий: найдено {len(sessions)} сессий. Экземпляр: {id(self.manager)}, simulations: {id(self.manager.simulations)}")
             data = [

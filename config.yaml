@@ -19,7 +19,7 @@ ui:
   default_interval: 5s
   logs_interval: 5s
   logs_page_size: 100
-env: dev2
+env: dev3
 ports:
   prod:
     simulation: 8060
@@ -33,7 +33,7 @@ ports:
     simulation: 8260
     logs: 8261
     session_manager: 8262
-  dev2:
+  dev3:
     simulation: 8360
     logs: 8361
     session_manager: 8362
