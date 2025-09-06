@@ -15,6 +15,9 @@ except ImportError:
 import urllib.parse
 import tempfile
 import shutil
+import pandas as pd
+import numpy as np
+import plotly.express as px
 
 logger = setup_logger('logs_dashboard')
 
@@ -184,6 +187,7 @@ class LogsDashboard:
             except Exception as e:
                 logger.error(f"Ошибка при обновлении таблицы файлов: {e}")
                 return html.P(f"Ошибка при загрузке файлов: {e}", className='text-red-500')
+
         @self.app.callback(
             Output('file-content', 'children'),
             [Input('url', 'pathname'), Input('page-size-store', 'data')]
@@ -208,54 +212,147 @@ class LogsDashboard:
                     reader = csv.DictReader(lines_for_table)
                     log_data = [row for row in reader if row]
 
-                    meta_table = html.Table([
-                        html.Tr([html.Th("Параметр"), html.Th("Значение")])
-                    ] + [
-                        html.Tr([html.Td(k), html.Td(v)]) for k, v in metadata.items()
-                    ], className='table-auto mb-4 border-collapse border border-gray-300')
+                # Преобразование в pandas DataFrame для расчетов
+                df = pd.DataFrame(log_data)
+                df['profit'] = pd.to_numeric(df['profit'], errors='coerce')
+                df['balance'] = pd.to_numeric(df['balance'], errors='coerce')
+                df['fee'] = pd.to_numeric(df['fee'], errors='coerce')
+                df['price'] = pd.to_numeric(df['price'], errors='coerce')
+                df['actual_price'] = pd.to_numeric(df['actual_price'], errors='coerce')
+                df['predicted_change_pct'] = pd.to_numeric(df['predicted_change_pct'], errors='coerce')
+                df['prediction_accuracy'] = df['prediction_accuracy'].apply(lambda x: 1 if x == 'True' else 0)
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
 
-                    columns = [
-                        {'name': 'Время', 'id': 'timestamp'},
-                        {'name': 'Тип', 'id': 'type'},
-                        {'name': 'Цена', 'id': 'price', 'type': 'numeric', 'format': {'specifier': '.2f'}},
-                        {'name': 'Количество', 'id': 'amount', 'type': 'numeric', 'format': {'specifier': '.6f'}},
-                        {'name': 'Комиссия', 'id': 'fee', 'type': 'numeric', 'format': {'specifier': '.2f'}},
-                        {'name': 'Баланс', 'id': 'balance', 'type': 'numeric', 'format': {'specifier': '.2f'}},
-                        {'name': 'Прибыль', 'id': 'profit', 'type': 'numeric', 'format': {'specifier': '.2f'}},
-                        {'name': 'Факт. цена', 'id': 'actual_price', 'type': 'numeric', 'format': {'specifier': '.2f'}},
-                        {'name': 'Прогноз', 'id': 'predicted_price', 'type': 'numeric', 'format': {'specifier': '.2f'}},
-                        {'name': 'Прогноз %', 'id': 'predicted_change_pct', 'type': 'numeric', 'format': {'specifier': '.2f'}},
-                        {'name': 'Причина', 'id': 'reason'},
-                        {'name': 'Точность', 'id': 'prediction_accuracy'},
-                        {'name': 'MAE 10min', 'id': 'mae_10min', 'type': 'numeric', 'format': {'specifier': '.4f'}},
-                        {'name': 'Точность %', 'id': 'accuracy_pct', 'type': 'numeric', 'format': {'specifier': '.2f'}}
-                    ]
+                # UPDATED: Расчет actual_change_pct на основе buy-sell пар (поскольку actual_price == price в логах)
+                df['actual_change_pct'] = 0.0
+                df['buy_predicted_change_pct'] = df['predicted_change_pct']
+                last_buy_price = None
+                last_pred_pct = None
+                for index, row in df.iterrows():
+                    if row['type'] == 'BUY':
+                        last_buy_price = row['price']
+                        last_pred_pct = row['predicted_change_pct']
+                    elif row['type'] == 'SELL':
+                        if last_buy_price is not None:
+                            df.at[index, 'actual_change_pct'] = ((row['price'] - last_buy_price) / last_buy_price) * 100
+                            df.at[index, 'buy_predicted_change_pct'] = last_pred_pct
 
-                    content_table = dash_table.DataTable(
-                        id='trade-table',
-                        data=log_data,
-                        columns=columns,
+                # Расчет метрик сессии
+                if not df.empty:
+                    initial_balance = float(metadata.get('Initial Balance', df['balance'].iloc[0]))  # Из metadata или первого ряда
+                    final_balance = df['balance'].iloc[-1]
+                    total_fee = df['fee'].sum()
+                    max_profit = df['profit'].max()
+                    max_loss = abs(df['profit'].min())
+                    avg_profit = df['profit'].mean()
+                    win_rate = (df['profit'] > 0).mean() * 100
+                    avg_accuracy = df['prediction_accuracy'].mean() * 100
+
+                    metrics_data = {
+                        'Метрика': [
+                            'Итоговый баланс', 'Сумма комиссий', 'Максимальный убыток',
+                            'Максимальная прибыль за сделку', 'Средняя прибыль за сделку',
+                            'Win rate (%)', 'Средняя точность прогноза (%)'
+                        ],
+                        'Значение': [
+                            f"{final_balance:.2f}", f"{total_fee:.2f}", f"{max_loss:.2f}",
+                            f"{max_profit:.2f}", f"{avg_profit:.2f}",
+                            f"{win_rate:.2f}", f"{avg_accuracy:.2f}"
+                        ]
+                    }
+                    metrics_table = dash_table.DataTable(
+                        data=[{'Метрика': m, 'Значение': v} for m, v in zip(metrics_data['Метрика'], metrics_data['Значение'])],
+                        columns=[{'name': 'Метрика', 'id': 'Метрика'}, {'name': 'Значение', 'id': 'Значение'}],
                         style_table={'overflowX': 'auto'},
                         style_cell={'textAlign': 'left', 'padding': '5px'},
-                        style_header={'fontWeight': 'bold', 'backgroundColor': '#f3f4f6'},
-                        style_data_conditional=[
-                            {'if': {'column_id': 'profit', 'filter_query': '{profit} > 0'}, 'color': 'green'},
-                            {'if': {'column_id': 'profit', 'filter_query': '{profit} < 0'}, 'color': 'red'},
-                            {'if': {'column_id': 'prediction_accuracy', 'filter_query': '{prediction_accuracy} = "True"'}, 'color': 'green'},
-                            {'if': {'column_id': 'prediction_accuracy', 'filter_query': '{prediction_accuracy} = "False"'}, 'color': 'red'}
-                        ],
-                        sort_action='native',
-                        filter_action='native',
-                        page_action='native',
-                        page_size=page_size or 25
+                        style_header={'fontWeight': 'bold', 'backgroundColor': '#f3f4f6'}
                     )
+                else:
+                    metrics_table = html.P("Нет данных для расчета метрик", className='text-red-500')
 
-                    return html.Div([
-                        html.H4("Параметры сессии", className="text-xl font-semibold mb-2"),
-                        meta_table,
-                        html.H4("История сделок", className="text-xl font-semibold mb-2 mt-4"),
-                        content_table
+                # Metadata таблица (без изменений)
+                meta_table = html.Table([
+                    html.Tr([html.Th("Параметр"), html.Th("Значение")])
+                ] + [
+                    html.Tr([html.Td(k), html.Td(v)]) for k, v in metadata.items()
+                ], className='table-auto mb-4 border-collapse border border-gray-300')
+
+                # Таблица сделок (без изменений)
+                columns = [
+                    {'name': 'Время', 'id': 'timestamp'},
+                    {'name': 'Тип', 'id': 'type'},
+                    {'name': 'Цена', 'id': 'price', 'type': 'numeric', 'format': {'specifier': '.2f'}},
+                    {'name': 'Количество', 'id': 'amount', 'type': 'numeric', 'format': {'specifier': '.6f'}},
+                    {'name': 'Комиссия', 'id': 'fee', 'type': 'numeric', 'format': {'specifier': '.2f'}},
+                    {'name': 'Баланс', 'id': 'balance', 'type': 'numeric', 'format': {'specifier': '.2f'}},
+                    {'name': 'Прибыль', 'id': 'profit', 'type': 'numeric', 'format': {'specifier': '.2f'}},
+                    {'name': 'Факт. цена', 'id': 'actual_price', 'type': 'numeric', 'format': {'specifier': '.2f'}},
+                    {'name': 'Прогноз', 'id': 'predicted_price', 'type': 'numeric', 'format': {'specifier': '.2f'}},
+                    {'name': 'Прогноз %', 'id': 'predicted_change_pct', 'type': 'numeric', 'format': {'specifier': '.2f'}},
+                    {'name': 'Причина', 'id': 'reason'},
+                    {'name': 'Точность', 'id': 'prediction_accuracy'},
+                    {'name': 'MAE 10min', 'id': 'mae_10min', 'type': 'numeric', 'format': {'specifier': '.4f'}},
+                    {'name': 'Точность %', 'id': 'accuracy_pct', 'type': 'numeric', 'format': {'specifier': '.2f'}}
+                ]
+
+                content_table = dash_table.DataTable(
+                    id='trade-table',
+                    data=log_data,
+                    columns=columns,
+                    style_table={'overflowX': 'auto'},
+                    style_cell={'textAlign': 'left', 'padding': '5px'},
+                    style_header={'fontWeight': 'bold', 'backgroundColor': '#f3f4f6'},
+                    style_data_conditional=[
+                        {'if': {'column_id': 'profit', 'filter_query': '{profit} > 0'}, 'color': 'green'},
+                        {'if': {'column_id': 'profit', 'filter_query': '{profit} < 0'}, 'color': 'red'},
+                        {'if': {'column_id': 'prediction_accuracy', 'filter_query': '{prediction_accuracy} = "True"'}, 'color': 'green'},
+                        {'if': {'column_id': 'prediction_accuracy', 'filter_query': '{prediction_accuracy} = "False"'}, 'color': 'red'}
+                    ],
+                    sort_action='native',
+                    filter_action='native',
+                    page_action='native',
+                    page_size=page_size or 25
+                )
+
+                # Визуализации
+                if not df.empty:
+                    # График баланса: фильтр non-zero balance для избежания спайков
+                    df_balance = df[df['balance'] > 0]
+                    if not df_balance.empty:
+                        balance_fig = px.line(df_balance, x='timestamp', y='balance', title='График баланса по времени')
+                    else:
+                        balance_fig = None
+
+                    # Гистограмма: добавлены отступы
+                    profit_hist = px.histogram(df, x='profit', title='Гистограмма прибыли по сделкам')
+                    profit_hist.update_layout(margin=dict(l=20, r=20, t=30, b=20))
+
+                    # UPDATED: Scatter на основе SELL строк, с прогнозом из BUY и actual % change от buy to sell
+                    df_sell = df[df['type'] == 'SELL']
+                    scatter_fig = px.scatter(df_sell, x='buy_predicted_change_pct', y='actual_change_pct',
+                                             title='Scatter: Прогноз % vs Фактический результат',
+                                             labels={'buy_predicted_change_pct': 'Прогноз % (из BUY)', 'actual_change_pct': 'Факт %'})
+                    if df_sell['actual_change_pct'].abs().sum() == 0:
+                        scatter_fig.add_annotation(text="Все фактические изменения 0% (проверьте данные)", showarrow=False)
+
+                    visualizations = html.Div([
+                        dcc.Graph(figure=balance_fig) if balance_fig else html.P("Нет ненулевых балансов для графика", className='text-red-500'),
+                        dcc.Graph(figure=profit_hist),
+                        dcc.Graph(figure=scatter_fig)
                     ])
+                else:
+                    visualizations = html.P("Нет данных для визуализаций", className='text-red-500')
+
+                return html.Div([
+                    html.H4("Параметры сессии", className="text-xl font-semibold mb-2"),
+                    meta_table,
+                    html.H4("Метрики сессии", className="text-xl font-semibold mb-2 mt-4"),
+                    metrics_table,
+                    html.H4("Визуализации", className="text-xl font-semibold mb-2 mt-4"),
+                    visualizations,
+                    html.H4("История сделок", className="text-xl font-semibold mb-2 mt-4"),
+                    content_table
+                ])
 
             except Exception as e:
                 logger.error(f"Ошибка чтения файла {filename}: {e}")
