@@ -3,3 +3,5 @@ beautifulsoup4
 pyyaml
 dash
 waitress
+flask_httpauth
+backports.zoneinfo
