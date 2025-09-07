@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 from utils.logger import setup_logger
 from utils.csv_writer import save_to_csv, update_csv_accuracy
 try:
@@ -12,10 +12,22 @@ logger = setup_logger('simulator')
 logger.setLevel('DEBUG')
 
 class TradeSimulator:
-    def __init__(self, start_balance: float, entry_threshold: float, exit_threshold: float,
-                 fee_pct: float, interval: str, session_id: str,
-                 mae_stop_enabled: bool = False, mae_stop_threshold: float = 12.0,
-                 stop_loss_pct: float = 0.01, max_hold_minutes: int = 1, max_hold_seconds: int = 5):
+    def __init__(self,
+                 start_balance: float,
+                 entry_threshold: float,
+                 exit_threshold: float,
+                 fee_pct: float,
+                 interval: str,
+                 session_id: str,
+                 mae_stop_enabled: bool = False,
+                 mae_stop_threshold: float = 12.0,
+                 stop_loss_pct: float = 1.0,          # проценты (1.0 = 1%)
+                 trailing_stop_pct: float = 0.0,       # проценты (0.5 = 0.5%)
+                 max_hold_minutes: int = 1,
+                 max_hold_seconds: int = 5,
+                 cooldown_seconds: Optional[int] = None,
+                 prediction_valid_seconds: Optional[int] = None):
+
         self.balance = start_balance
         self.btc = 0.0
         self.buy_price = 0.0
@@ -27,6 +39,7 @@ class TradeSimulator:
         self.mae_stop_enabled = mae_stop_enabled
         self.mae_stop_threshold = mae_stop_threshold
         self.stop_loss_pct = stop_loss_pct
+        self.trailing_stop_pct = trailing_stop_pct
         self.stop_loss_price = None
         self.auto_paused = False
         self.last_mae = None
@@ -50,6 +63,7 @@ class TradeSimulator:
             'mae_stop_enabled': self.mae_stop_enabled,
             'mae_stop_threshold': self.mae_stop_threshold,
             'stop_loss_pct': self.stop_loss_pct,
+            'trailing_stop_pct': self.trailing_stop_pct,
             'max_hold_minutes': max_hold_minutes,
             'max_hold_seconds': max_hold_seconds
         }
@@ -61,93 +75,128 @@ class TradeSimulator:
         self.max_hold_minutes = max_hold_minutes
         self.max_hold_seconds = max_hold_seconds
 
+        # prediction / realtime helpers
+        self.last_prediction: Optional[Dict] = None
+        self.peak_price: Optional[float] = None
+        self.cooldown_until: Optional[datetime] = None
+
+        # sensible defaults if не заданы
+        default_cooldown = {'5s': 2, '1m': 30, '1h': 600}
+        default_pred_valid = {'5s': 10, '1m': 120, '1h': 3600}
+
+        self.cooldown_seconds = cooldown_seconds if cooldown_seconds is not None else default_cooldown.get(interval, 30)
+        self.prediction_valid_seconds = prediction_valid_seconds if prediction_valid_seconds is not None else default_pred_valid.get(interval, 120)
+
         logger.info(
             f"Инициализация симулятора ({self.interval}, сессия {self.session_id}): "
-            f"баланс={self.balance:.4f}, вход={self.entry_threshold:.6f}%, "
-            f"выход={self.exit_threshold:.6f}%, комиссия={self.fee_pct:.6f}%, "
+            f"баланс={self.balance:.4f}, вход={self.entry_threshold:.3f}%, "
+            f"выход={self.exit_threshold:.3f}%, комиссия={self.fee_pct:.3f}%, "
             f"MAE стоп={self.mae_stop_enabled}, MAE порог={self.mae_stop_threshold}, "
-            f"стоп-лосс={self.stop_loss_pct * 100:.4f}%, макс. удержание={self.max_hold_minutes} мин / {self.max_hold_seconds} сек"
+            f"стоп-лосс={self.stop_loss_pct:.3f}%, trailing={self.trailing_stop_pct:.3f}%, "
+            f"cooldown={self.cooldown_seconds}s, pred_valid={self.prediction_valid_seconds}s"
         )
 
     def calculate_fee(self, amount: float) -> float:
         return amount * (self.fee_pct / 100)
 
-    def check_prediction_accuracy(self, last_tick: Dict, trade_price: float, operation: str) -> bool:
-        last_actual_price = last_tick['actual_price']
-        last_pred_change = last_tick['predictions'].get(self.interval)[1]
+    def check_prediction_accuracy(self, last_tick: Dict, trade_price: float, operation: str) -> Optional[bool]:
+        try:
+            last_actual_price = float(last_tick['actual_price'])
+            last_pred_change = last_tick['predictions'].get(self.interval)[1]
+        except Exception:
+            return None
+
         actual_change = ((trade_price - last_actual_price) / last_actual_price) * 100
         predicted_sign = 1 if last_pred_change > 0 else -1 if last_pred_change < 0 else 0
         actual_sign = 1 if actual_change > 0 else -1 if actual_change < 0 else 0
         if predicted_sign == 0:
-            logger.debug(f"[{self.session_id}] Нейтральный прогноз, точность не проверяется")
             return None
-        is_correct = predicted_sign == actual_sign
-        logger.debug(f"[{self.session_id}] Проверка точности: op={operation}, pred_change={last_pred_change:.6f}%, actual_change={actual_change:.6f}%, correct={is_correct}")
-        return is_correct
+        return predicted_sign == actual_sign
 
     def set_stop_loss(self):
         if self.btc > 0:
-            self.stop_loss_price = self.buy_price * (1 - self.stop_loss_pct)
-            logger.debug(f"[{self.session_id}] Установлен стоп-лосс: {self.stop_loss_price:.4f}")
+            self.stop_loss_price = self.buy_price * (1 - self.stop_loss_pct / 100)
 
     def monitor_stop_loss(self, tick: Dict):
-        trade_price = tick.get('realtime_price', tick['actual_price'])
-        if self.btc > 0 and self.stop_loss_price is not None:
-            new_sl = trade_price * (1 - self.stop_loss_pct)
-            self.stop_loss_price = max(self.stop_loss_price, new_sl)
-            logger.debug(f"[{self.session_id}] Мониторинг стоп-лосс: price={trade_price:.4f}, sl_price={self.stop_loss_price:.4f}")
-            if trade_price <= self.stop_loss_price:
-                logger.warning(f"[{self.session_id}] Сработал стоп-лосс: price={trade_price:.4f} <= {self.stop_loss_price:.4f}")
+        trade_price = float(tick.get('realtime_price', tick.get('actual_price')))
+        if self.btc > 0:
+            if self.peak_price is None or trade_price > self.peak_price:
+                self.peak_price = trade_price
+
+            if self.stop_loss_price is not None:
+                new_sl = trade_price * (1 - self.stop_loss_pct / 100)
+                self.stop_loss_price = max(self.stop_loss_price, new_sl)
+
+            if self.trailing_stop_pct > 0 and self.peak_price is not None:
+                trailing_level = self.peak_price * (1 - self.trailing_stop_pct / 100)
+                if trade_price <= trailing_level:
+                    self.sell(tick['timestamp'], trade_price, None, None, reason="Trailing-stop")
+                    self.auto_paused = False
+                    return
+
+            if self.stop_loss_price is not None and trade_price <= self.stop_loss_price:
                 self.sell(tick['timestamp'], trade_price, None, None, reason="Стоп-лосс")
                 self.auto_paused = False
 
+    def _prediction_is_fresh(self) -> bool:
+        if not self.last_prediction:
+            return False
+        age = (datetime.now(ZoneInfo("Europe/Moscow")) - self.last_prediction['time']).total_seconds()
+        return age <= self.prediction_valid_seconds
+
     def process_tick(self, tick: Dict):
         timestamp = tick['timestamp']
-        trade_price = tick.get('realtime_price', tick['actual_price'])
-        prediction = tick['predictions'].get(self.interval)
+        trade_price = float(tick.get('realtime_price', tick.get('actual_price')))
+        prediction = tick['predictions'].get(self.interval) if 'predictions' in tick else None
         self.last_mae = tick.get('mae_10min')
         if self.last_mae is not None:
             self.mae_series.append((timestamp, self.last_mae))
 
-        logger.info(f"[{self.session_id}] Тик: time={timestamp}, trade_price={trade_price:.4f}, pred={prediction}, mae={self.last_mae}, in_position={self.btc > 0}, paused={self.auto_paused}")
+        now = datetime.now(ZoneInfo("Europe/Moscow"))
+
+        if prediction:
+            predicted_price, predicted_change_pct, forecast_time = prediction
+            changed = (
+                self.last_prediction is None or
+                self.last_prediction.get('predicted_price') != predicted_price or
+                self.last_prediction.get('predicted_change_pct') != predicted_change_pct
+            )
+            if changed:
+                self.last_prediction = {
+                    'predicted_price': predicted_price,
+                    'predicted_change_pct': predicted_change_pct,
+                    'time': now
+                }
 
         self.monitor_stop_loss(tick)
 
         if self.auto_paused:
-            logger.info(f"[{self.session_id}] Авто-пауза активна, пропуск сигналов")
             return
 
         if self.mae_stop_enabled and self.last_mae is not None and self.last_mae > self.mae_stop_threshold:
-            logger.warning(f"[{self.session_id}] MAE {self.last_mae:.4f} > {self.mae_stop_threshold}, авто-пауза и стоп-лосс")
             self.auto_paused = True
             self.set_stop_loss()
             return
 
-        if not prediction:
-            logger.info(f"[{self.session_id}] Нет предсказания для текущего тика")
-            return
-
-        predicted_price, predicted_change_pct, forecast_time = prediction
-        logger.debug(f"[{self.session_id}] Предсказание: price={predicted_price:.4f}, change={predicted_change_pct:.6f}%, time={forecast_time}")
+        predicted_change_pct = self.last_prediction['predicted_change_pct'] if self.last_prediction else None
+        pred_is_fresh = self._prediction_is_fresh()
 
         if self.btc == 0:
-            if predicted_change_pct >= self.entry_threshold:
-                logger.info(f"[{self.session_id}] Сигнал BUY: change={predicted_change_pct:.6f}% >= {self.entry_threshold:.6f}%")
-                self.buy(timestamp, trade_price, predicted_price, predicted_change_pct)
-            else:
-                logger.debug(f"[{self.session_id}] Нет BUY: change={predicted_change_pct:.6f}% < {self.entry_threshold:.6f}%")
+            if self.cooldown_until and now < self.cooldown_until:
+                return
+            if pred_is_fresh and predicted_change_pct is not None and predicted_change_pct >= self.entry_threshold:
+                self.buy(timestamp, trade_price, self.last_prediction.get('predicted_price'), predicted_change_pct)
         else:
             current_profit = (trade_price - self.buy_price) / self.buy_price * 100
             sell_reason = None
 
             if current_profit >= self.exit_threshold:
                 sell_reason = "Выход: прибыль >= порога"
-            elif predicted_change_pct < 0:
+            elif pred_is_fresh and predicted_change_pct is not None and predicted_change_pct < 0:
                 sell_reason = "Выход: прогноз стал отрицательным"
             elif current_profit <= -self.stop_loss_pct:
                 sell_reason = "Выход: стоп-лосс"
             elif self.entry_time:
-                now = datetime.now(ZoneInfo("Europe/Moscow"))
                 hold_time = now - self.entry_time
                 if self.interval == '5s' and hold_time.total_seconds() > self.max_hold_seconds and current_profit < 0:
                     sell_reason = f"Выход: удержание > {self.max_hold_seconds} сек и убыток"
@@ -156,16 +205,14 @@ class TradeSimulator:
             elif self.last_mae is not None and self.last_mae > self.mae_stop_threshold and current_profit < 0:
                 sell_reason = f"Выход: высокая MAE {self.last_mae:.4f} и убыток"
 
-            logger.info(f"[{self.session_id}] Решение: current_profit={current_profit:.6f}%, pred_change={predicted_change_pct:.6f}%, decision={sell_reason or 'hold'}")
-
             if sell_reason:
-                self.sell(timestamp, trade_price, predicted_price, predicted_change_pct, reason=sell_reason)
+                self.sell(timestamp, trade_price, self.last_prediction.get('predicted_price') if self.last_prediction else None, predicted_change_pct, reason=sell_reason)
+                self.cooldown_until = datetime.now(ZoneInfo("Europe/Moscow")) + timedelta(seconds=self.cooldown_seconds)
 
         self.last_tick = tick
 
-    def buy(self, timestamp: str, trade_price: float, predicted_price: float, predicted_change_pct: float):
+    def buy(self, timestamp: str, trade_price: float, predicted_price: Optional[float], predicted_change_pct: Optional[float]):
         if self.balance <= 0:
-            logger.warning(f"[{self.session_id}] BUY отменён: недостаточно средств")
             return
 
         fee = self.calculate_fee(self.balance)
@@ -176,6 +223,7 @@ class TradeSimulator:
         self.balance = 0.0
         self.set_stop_loss()
         self.entry_time = datetime.now(ZoneInfo("Europe/Moscow"))
+        self.peak_price = trade_price
 
         buy_accuracy = None
         if self.last_tick:
@@ -203,12 +251,10 @@ class TradeSimulator:
         }
         self.trade_log.append(self.pending_log)
         self.balance_series.append((timestamp, self.balance))
-        logger.info(f"BUY ({self.session_id}): {self.btc:.6f} BTC по {trade_price:.4f}, комиссия={fee:.4f}")
         self.save_session()
 
-    def sell(self, timestamp: str, trade_price: float, predicted_price: float, predicted_change_pct: float, reason: str = None):
+    def sell(self, timestamp: str, trade_price: float, predicted_price: Optional[float], predicted_change_pct: Optional[float], reason: str = None):
         if self.btc <= 0:
-            logger.warning(f"[{self.session_id}] SELL отменён: нет BTC")
             return
 
         proceeds = self.btc * trade_price
@@ -218,7 +264,7 @@ class TradeSimulator:
         self.balance = net_proceeds
 
         if reason is None:
-            reason = "Стоп-лосс" if predicted_price is None else "Выход: прибыль/прогноз"
+            reason = "Выход"
 
         self.pending_log = {
             'timestamp': timestamp,
@@ -241,10 +287,6 @@ class TradeSimulator:
         self.balance_series.append((timestamp, self.balance))
         self.profit_series.append((timestamp, profit))
         self.accuracy_series.append((timestamp, self.get_prediction_accuracy()))
-        if profit < 0:
-            logger.warning(f"SELL ({self.session_id}): {self.btc:.6f} BTC по {trade_price:.4f}, комиссия={fee:.6f}, убыток={profit:.6f}, reason={reason}")
-        else:
-            logger.info(f"SELL ({self.session_id}): {self.btc:.6f} BTC по {trade_price:.4f}, комиссия={fee:.6f}, прибыль={profit:.6f}, reason={reason}")
         self.save_session()
 
         self.btc = 0.0
@@ -253,6 +295,7 @@ class TradeSimulator:
         self.pending_log = None
         self.stop_loss_price = None
         self.entry_time = None
+        self.peak_price = None
 
     def update_session(self):
         if not self.trade_log:

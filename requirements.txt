@@ -5,3 +5,4 @@ dash
 waitress
 flask_httpauth
 backports.zoneinfo
+pandas
