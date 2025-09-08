@@ -37,7 +37,7 @@ def save_to_csv(trade_log: List[Dict], metadata: Dict, filename: str):
                     writer.writerow(row)
             else:
                 logger.warning("trade_log пуст, записываются только метаданные")
-        logger.info(f"Сохранено в CSV: {filename}")
+        logger.debug(f"Сохранено в CSV: {filename}")
     except Exception as e:
         logger.error(f"Ошибка при сохранении в CSV {filename}: {e}")
 
