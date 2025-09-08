@@ -75,14 +75,24 @@ class TradeSimulator:
         self.max_hold_minutes = max_hold_minutes
         self.max_hold_seconds = max_hold_seconds
 
+        # max_hold на основе interval
+        if self.interval == '5s':
+            self.max_hold = timedelta(seconds=self.max_hold_seconds)
+        elif self.interval == '1m':
+            self.max_hold = timedelta(minutes=self.max_hold_minutes)
+        elif self.interval == '1h':
+            self.max_hold = timedelta(hours=1)  # Пример, можно настроить в конфиге
+        else:
+            raise ValueError(f"Неподдерживаемый интервал: {self.interval}")
+
         # prediction / realtime helpers
         self.last_prediction: Optional[Dict] = None
         self.peak_price: Optional[float] = None
         self.cooldown_until: Optional[datetime] = None
 
         # sensible defaults if не заданы
-        default_cooldown = {'5s': 2, '1m': 30, '1h': 600}
-        default_pred_valid = {'5s': 10, '1m': 120, '1h': 3600}
+        default_cooldown = {'5s': 2, '1m': 30, '1h': 1800}  # 30 мин для часа, пример
+        default_pred_valid = {'5s': 10, '1m': 120, '1h': 7200}  # 2 часа для часа, пример
 
         self.cooldown_seconds = cooldown_seconds if cooldown_seconds is not None else default_cooldown.get(interval, 30)
         self.prediction_valid_seconds = prediction_valid_seconds if prediction_valid_seconds is not None else default_pred_valid.get(interval, 120)
@@ -93,6 +103,7 @@ class TradeSimulator:
             f"выход={self.exit_threshold:.3f}%, комиссия={self.fee_pct:.3f}%, "
             f"MAE стоп={self.mae_stop_enabled}, MAE порог={self.mae_stop_threshold}, "
             f"стоп-лосс={self.stop_loss_pct:.3f}%, trailing={self.trailing_stop_pct:.3f}%, "
+            f"max_hold={self.max_hold}, "
             f"cooldown={self.cooldown_seconds}s, pred_valid={self.prediction_valid_seconds}s"
         )
 
@@ -138,70 +149,52 @@ class TradeSimulator:
                 self.sell(tick['timestamp'], trade_price, None, None, reason="Стоп-лосс")
                 self.auto_paused = False
 
-    def _prediction_is_fresh(self) -> bool:
-        if not self.last_prediction:
-            return False
-        age = (datetime.now(ZoneInfo("Europe/Moscow")) - self.last_prediction['time']).total_seconds()
-        return age <= self.prediction_valid_seconds
-
     def process_tick(self, tick: Dict):
         timestamp = tick['timestamp']
         trade_price = float(tick.get('realtime_price', tick.get('actual_price')))
-        prediction = tick['predictions'].get(self.interval) if 'predictions' in tick else None
-        self.last_mae = tick.get('mae_10min')
-        if self.last_mae is not None:
-            self.mae_series.append((timestamp, self.last_mae))
-
         now = datetime.now(ZoneInfo("Europe/Moscow"))
+        self.last_mae = tick.get('mae_10min', 0)
+        self.mae_series.append((timestamp, self.last_mae))
 
-        if prediction:
-            predicted_price, predicted_change_pct, forecast_time = prediction
-            changed = (
-                self.last_prediction is None or
-                self.last_prediction.get('predicted_price') != predicted_price or
-                self.last_prediction.get('predicted_change_pct') != predicted_change_pct
-            )
-            if changed:
-                self.last_prediction = {
-                    'predicted_price': predicted_price,
-                    'predicted_change_pct': predicted_change_pct,
-                    'time': now
-                }
-
-        self.monitor_stop_loss(tick)
+        if self.mae_stop_enabled and self.last_mae > self.mae_stop_threshold:
+            self.auto_paused = True
+        else:
+            self.auto_paused = False
 
         if self.auto_paused:
+            if self.btc > 0:
+                self.sell(timestamp, trade_price, None, None, reason="Авто-пауза: высокая MAE")
+            self.last_tick = tick
             return
 
-        if self.mae_stop_enabled and self.last_mae is not None and self.last_mae > self.mae_stop_threshold:
-            self.auto_paused = True
-            self.set_stop_loss()
-            return
+        predicted_price, predicted_change_pct, forecast_time = tick['predictions'].get(self.interval, (0, 0, ''))
 
-        predicted_change_pct = self.last_prediction['predicted_change_pct'] if self.last_prediction else None
-        pred_is_fresh = self._prediction_is_fresh()
+        if self.cooldown_until and now < self.cooldown_until:
+            self.last_tick = tick
+            return
 
         if self.btc == 0:
-            if self.cooldown_until and now < self.cooldown_until:
-                return
-            if pred_is_fresh and predicted_change_pct is not None and predicted_change_pct >= self.entry_threshold:
-                self.buy(timestamp, trade_price, self.last_prediction.get('predicted_price'), predicted_change_pct)
+            if predicted_change_pct >= self.entry_threshold:
+                pred_time = datetime.strptime(forecast_time, '%Y-%m-%d %H:%M:%S') if forecast_time else now
+                if (now - pred_time).total_seconds() <= self.prediction_valid_seconds:
+                    self.buy(timestamp, trade_price, predicted_price, predicted_change_pct)
+                    self.last_prediction = {
+                        'predicted_price': predicted_price,
+                        'predicted_change_pct': predicted_change_pct
+                    }
         else:
-            current_profit = (trade_price - self.buy_price) / self.buy_price * 100
+            current_profit = ((trade_price - self.buy_price) / self.buy_price) * 100
             sell_reason = None
-
             if current_profit >= self.exit_threshold:
                 sell_reason = "Выход: прибыль >= порога"
-            elif pred_is_fresh and predicted_change_pct is not None and predicted_change_pct < 0:
-                sell_reason = "Выход: прогноз стал отрицательным"
+            elif current_profit <= -self.exit_threshold and current_profit < 0:
+                sell_reason = "Выход: убыток стал отрицательным"
             elif current_profit <= -self.stop_loss_pct:
                 sell_reason = "Выход: стоп-лосс"
             elif self.entry_time:
                 hold_time = now - self.entry_time
-                if self.interval == '5s' and hold_time.total_seconds() > self.max_hold_seconds and current_profit < 0:
-                    sell_reason = f"Выход: удержание > {self.max_hold_seconds} сек и убыток"
-                elif self.interval == '1m' and hold_time > timedelta(minutes=self.max_hold_minutes) and current_profit < 0:
-                    sell_reason = f"Выход: удержание > {self.max_hold_minutes} мин и убыток"
+                if hold_time > self.max_hold and current_profit < 0:
+                    sell_reason = f"Выход: удержание > {self.max_hold} и убыток"
             elif self.last_mae is not None and self.last_mae > self.mae_stop_threshold and current_profit < 0:
                 sell_reason = f"Выход: высокая MAE {self.last_mae:.4f} и убыток"
 

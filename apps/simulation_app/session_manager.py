@@ -60,7 +60,8 @@ class SessionManagerDashboard:
                         id='new-interval-dropdown',
                         options=[
                             {'label': '5 секунд', 'value': '5s'},
-                            {'label': '1 минута', 'value': '1m'}
+                            {'label': '1 минута', 'value': '1m'},
+                            {'label': '1 час', 'value': '1h'}  # Добавлено
                         ],
                         value='5s',
                         className='border rounded px-2 py-1 w-32'
