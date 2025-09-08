@@ -175,7 +175,7 @@ class TradeSimulator:
 
         if self.btc == 0:
             if predicted_change_pct >= self.entry_threshold:
-                pred_time = datetime.strptime(forecast_time, '%Y-%m-%d %H:%M:%S') if forecast_time else now
+                pred_time = datetime.strptime(forecast_time, '%Y-%m-%d %H:%M:%S').replace(tzinfo=ZoneInfo("Europe/Moscow")) if forecast_time else now
                 if (now - pred_time).total_seconds() <= self.prediction_valid_seconds:
                     self.buy(timestamp, trade_price, predicted_price, predicted_change_pct)
                     self.last_prediction = {

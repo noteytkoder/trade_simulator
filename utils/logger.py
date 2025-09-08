@@ -1,16 +1,16 @@
 import logging
 import os
-from logging.handlers import RotatingFileHandler
+from concurrent_log_handler import ConcurrentRotatingFileHandler
 
-def setup_logger(name: str, log_file: str = 'simulator.log', max_bytes: int = 10485760, backup_count: int = 5) -> logging.Logger:
+def setup_logger(name: str, log_file: str = 'simulator.log', max_bytes: int = 10485760, backup_count: int = 10) -> logging.Logger:
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
 
     # Форматтер
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-    # Ротирующий файловый хендлер
-    file_handler = RotatingFileHandler(
+    # Ротирующий файловый хендлер с поддержкой многопоточности
+    file_handler = ConcurrentRotatingFileHandler(
         log_file,
         maxBytes=max_bytes,  # Максимальный размер файла в байтах (10 МБ)
         backupCount=backup_count,  # Количество резервных файлов
