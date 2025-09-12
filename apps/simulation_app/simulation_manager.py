@@ -28,12 +28,9 @@ class SimulationManager:
         self.mae_stop_threshold = self.config.get('mae_stop_threshold', 12.0)
         self.stop_loss_pct = self.config.get('stop_loss_pct', 0.01)
         self.crash_halt_enabled = self.config['market_crash_halt'].get('enabled', False)
-        self.crash_threshold_pct = self.config['market_crash_halt'].get('threshold_pct', -5.0)
+        self.crash_threshold_pct = self.config['market_crash_halt'].get('threshold_pct', 5.0)
         self.crash_lookback_minutes = self.config['market_crash_halt'].get('lookback_minutes', 10)
-        self.crash_recovery_mode = self.config['market_crash_halt'].get('recovery_mode', 'price_recovery')
         self.recovery_threshold_pct = self.config['market_crash_halt'].get('recovery_threshold_pct', 3.0)
-        self.stable_bars_count = self.config['market_crash_halt'].get('stable_bars_count', 10)
-        self.stable_bar_threshold_pct = self.config['market_crash_halt'].get('stable_bar_threshold_pct', 1.0)
         self.simulations = {}
         self.current_price = None
         self.lock = threading.Lock()
@@ -42,8 +39,7 @@ class SimulationManager:
     def start_simulation(self, interval, balance, entry_threshold, exit_threshold, fee,
                         mae_stop_enabled=None, mae_stop_threshold=None, stop_loss_pct=None,
                         crash_halt_enabled=None, crash_threshold_pct=None, crash_lookback_minutes=None,
-                        crash_recovery_mode=None, recovery_threshold_pct=None,
-                        stable_bars_count=None, stable_bar_threshold_pct=None) -> str:
+                        recovery_threshold_pct=None) -> str:
         session_id = f"{interval}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         mae_stop_enabled = mae_stop_enabled if mae_stop_enabled is not None else self.mae_stop_enabled
         mae_stop_threshold = mae_stop_threshold if mae_stop_threshold is not None else self.mae_stop_threshold
@@ -51,10 +47,7 @@ class SimulationManager:
         crash_halt_enabled = crash_halt_enabled if crash_halt_enabled is not None else self.crash_halt_enabled
         crash_threshold_pct = crash_threshold_pct if crash_threshold_pct is not None else self.crash_threshold_pct
         crash_lookback_minutes = crash_lookback_minutes if crash_lookback_minutes is not None else self.crash_lookback_minutes
-        crash_recovery_mode = crash_recovery_mode if crash_recovery_mode is not None else self.crash_recovery_mode
         recovery_threshold_pct = recovery_threshold_pct if recovery_threshold_pct is not None else self.recovery_threshold_pct
-        stable_bars_count = stable_bars_count if stable_bars_count is not None else self.stable_bars_count
-        stable_bar_threshold_pct = stable_bar_threshold_pct if stable_bar_threshold_pct is not None else self.stable_bar_threshold_pct
         with self.lock:
             logger.debug(f"Начало создания сессии {session_id} для {interval}. Экземпляр: {id(self)}, simulations: {id(self.simulations)}")
             if interval not in self.simulations:
@@ -65,10 +58,7 @@ class SimulationManager:
                 crash_halt_enabled=crash_halt_enabled,
                 crash_threshold_pct=crash_threshold_pct,
                 crash_lookback_minutes=crash_lookback_minutes,
-                crash_recovery_mode=crash_recovery_mode,
-                recovery_threshold_pct=recovery_threshold_pct,
-                stable_bars_count=stable_bars_count,
-                stable_bar_threshold_pct=stable_bar_threshold_pct
+                recovery_threshold_pct=recovery_threshold_pct
             )
             thread = threading.Thread(target=self._run_loop, args=(sim, session_id), daemon=True)
             self.simulations[interval][session_id] = {
@@ -144,7 +134,7 @@ class SimulationManager:
 
     def get_simulator(self, interval, session_id):
         with self.lock:
-            sim = self.simulations.get(interval, {}).get("sim")
+            sim = self.simulations.get(interval, {}).get(session_id, {}).get("sim")
             return sim
 
     def list_sessions(self) -> List[Dict]:

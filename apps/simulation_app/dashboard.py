@@ -315,7 +315,6 @@ class TradingDashboard:
                 if sim and sim.crash_paused:
                     sim.crash_paused = False
                     sim.auto_paused = False
-                    sim.stable_bars = 0
                     sim.lowest_price_after_crash = None
                     logger.info(f"Краш-пауза сброшена для сессии {session_id} через дашборд")
                 return "Сбросить краш-паузу"

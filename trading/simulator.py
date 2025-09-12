@@ -28,13 +28,9 @@ class TradeSimulator:
                  cooldown_seconds: Optional[int] = None,
                  prediction_valid_seconds: Optional[int] = None,
                  crash_halt_enabled: bool = False,
-                 crash_threshold_pct: float = -5.0,
+                 crash_threshold_pct: float = 5.0,
                  crash_lookback_minutes: int = 10,
-                 crash_recovery_mode: str = "price_recovery",
-                 recovery_threshold_pct: float = 3.0,
-                 stable_bars_count: int = 10,
-                 stable_bar_threshold_pct: float = 1.0):
-
+                 recovery_threshold_pct: float = 3.0):
         self.balance = start_balance
         self.btc = 0.0
         self.buy_price = 0.0
@@ -76,10 +72,7 @@ class TradeSimulator:
             'crash_halt_enabled': crash_halt_enabled,
             'crash_threshold_pct': crash_threshold_pct,
             'crash_lookback_minutes': crash_lookback_minutes,
-            'crash_recovery_mode': crash_recovery_mode,
-            'recovery_threshold_pct': recovery_threshold_pct,
-            'stable_bars_count': stable_bars_count,
-            'stable_bar_threshold_pct': stable_bar_threshold_pct
+            'recovery_threshold_pct': recovery_threshold_pct
         }
         self.correct_predictions = 0
         self.total_predictions = 0
@@ -91,14 +84,15 @@ class TradeSimulator:
         self.crash_halt_enabled = crash_halt_enabled
         self.crash_threshold_pct = crash_threshold_pct
         self.crash_lookback_minutes = crash_lookback_minutes
-        self.crash_recovery_mode = crash_recovery_mode
         self.recovery_threshold_pct = recovery_threshold_pct
-        self.stable_bars_count = stable_bars_count
-        self.stable_bar_threshold_pct = stable_bar_threshold_pct
         self.crash_paused = False
         self.price_history = []
         self.lowest_price_after_crash = None
-        self.stable_bars = 0
+
+        # prediction / realtime helpers
+        self.last_prediction: Optional[Dict] = None
+        self.peak_price: Optional[float] = None
+        self.cooldown_until: Optional[datetime] = None
 
         if self.interval == '5s':
             self.max_hold = timedelta(seconds=self.max_hold_seconds)
@@ -125,10 +119,7 @@ class TradeSimulator:
             f"crash_halt_enabled={self.crash_halt_enabled}, "
             f"crash_threshold={self.crash_threshold_pct}%, "
             f"crash_lookback={self.crash_lookback_minutes}min, "
-            f"recovery_mode={self.crash_recovery_mode}, "
-            f"recovery_threshold={self.recovery_threshold_pct}%, "
-            f"stable_bars_count={self.stable_bars_count}, "
-            f"stable_bar_threshold={self.stable_bar_threshold_pct}%"
+            f"recovery_threshold={self.recovery_threshold_pct}%"
         )
 
     def calculate_fee(self, amount: float) -> float:
@@ -188,7 +179,7 @@ class TradeSimulator:
         prices = [p[1] for p in self.price_history]
         max_price = max(prices)
         drop_pct = (trade_price - max_price) / max_price * 100
-        if drop_pct <= self.crash_threshold_pct:
+        if drop_pct <= -self.crash_threshold_pct:  # Используем -crash_threshold_pct
             logger.warning(f"Обнаружено падение рынка: {drop_pct:.2f}% за {self.crash_lookback_minutes}мин")
             self.lowest_price_after_crash = trade_price
             return True
@@ -199,27 +190,13 @@ class TradeSimulator:
             return False
         trade_price = float(tick.get('realtime_price', tick.get('actual_price')))
         
-        if self.crash_recovery_mode == "price_recovery":
-            if self.lowest_price_after_crash is None:
-                self.lowest_price_after_crash = trade_price
-                return False
-            recovery_pct = (trade_price - self.lowest_price_after_crash) / self.lowest_price_after_crash * 100
-            if recovery_pct >= self.recovery_threshold_pct:
-                logger.info(f"Восстановление рынка: цена выросла на {recovery_pct:.2f}% от минимума")
-                return True
-        elif self.crash_recovery_mode == "stable_bars":
-            if len(self.price_history) < 2:
-                return False
-            last_price = self.price_history[-2][1]
-            change_pct = abs((trade_price - last_price) / last_price * 100)
-            if change_pct <= self.stable_bar_threshold_pct:
-                self.stable_bars += 1
-                if self.stable_bars >= self.stable_bars_count:
-                    logger.info(f"Восстановление рынка: {self.stable_bars} стабильных баров")
-                    return True
-            else:
-                self.stable_bars = 0
-                logger.debug(f"Сброс стабильных баров: изменение {change_pct:.2f}% > {self.stable_bar_threshold_pct}%")
+        if self.lowest_price_after_crash is None:
+            self.lowest_price_after_crash = trade_price
+            return False
+        recovery_pct = (trade_price - self.lowest_price_after_crash) / self.lowest_price_after_crash * 100
+        if recovery_pct >= self.recovery_threshold_pct:
+            logger.info(f"Восстановление рынка: цена выросла на {recovery_pct:.2f}% от минимума")
+            return True
         return False
 
     def process_tick(self, tick: Dict):
@@ -239,7 +216,6 @@ class TradeSimulator:
         if self.crash_paused and self.check_recovery(tick):
             self.crash_paused = False
             self.auto_paused = False
-            self.stable_bars = 0
             self.lowest_price_after_crash = None
             logger.info(f"Сессия возобновлена: рынок восстановился")
 

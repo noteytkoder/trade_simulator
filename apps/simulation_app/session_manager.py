@@ -41,41 +41,27 @@ class SessionManagerDashboard:
                 html.H3("Создать новую сессию", className='text-xl font-semibold mb-4'),
                 html.Div(className='flex flex-wrap gap-4 items-center', children=[
                     html.Label("Баланс:", className='font-medium'),
-                    dcc.Input(id='new-balance-input', type='number', value=self.config['start_balance'], className='border rounded px-2 py-1 w-32'),
+                    dcc.Input(id='new-balance-input', type='number', value=self.config['start_balance'], className='border rounded px-2 py-1 w-32', min=0),
                     html.Label("Порог входа (%):", className='font-medium'),
-                    dcc.Input(id='new-entry-threshold-input', type='number', value=self.config['entry_threshold'], className='border rounded px-2 py-1 w-32'),
+                    dcc.Input(id='new-entry-threshold-input', type='number', value=self.config['entry_threshold'], className='border rounded px-2 py-1 w-32', min=0),
                     html.Label("Порог выхода (%):", className='font-medium'),
-                    dcc.Input(id='new-exit-threshold-input', type='number', value=self.config['exit_threshold'], className='border rounded px-2 py-1 w-32'),
+                    dcc.Input(id='new-exit-threshold-input', type='number', value=self.config['exit_threshold'], className='border rounded px-2 py-1 w-32', min=0),
                     html.Label("Комиссия (%):", className='font-medium'),
-                    dcc.Input(id='new-fee-input', type='number', value=self.config['fee_pct'], className='border rounded px-2 py-1 w-32'),
+                    dcc.Input(id='new-fee-input', type='number', value=self.config['fee_pct'], className='border rounded px-2 py-1 w-32', min=0),
                     html.Label("MAE стоп включен:", className='font-medium'),
                     dcc.Checklist(id='new-mae-enabled', options=[{'label': '', 'value': 'enabled'}], value=['enabled'] if self.config['mae_stop_enabled'] else [], className='border rounded px-2 py-1'),
                     html.Label("MAE порог:", className='font-medium'),
-                    dcc.Input(id='new-mae-threshold', type='number', value=self.config['mae_stop_threshold'], className='border rounded px-2 py-1 w-32'),
+                    dcc.Input(id='new-mae-threshold', type='number', value=self.config['mae_stop_threshold'], className='border rounded px-2 py-1 w-32', min=0),
                     html.Label("Стоп-лосс %:", className='font-medium'),
-                    dcc.Input(id='new-sl-pct', type='number', value=self.config['stop_loss_pct'], className='border rounded px-2 py-1 w-32'),
+                    dcc.Input(id='new-sl-pct', type='number', value=self.config['stop_loss_pct'], className='border rounded px-2 py-1 w-32', min=0),
                     html.Label("Краш-пауза:", className='font-medium'),
                     dcc.Checklist(id='new-crash-enabled', options=[{'label': '', 'value': 'enabled'}], value=['enabled'] if self.config['market_crash_halt']['enabled'] else [], className='border rounded px-2 py-1'),
                     html.Label("Порог падения (%):", className='font-medium'),
-                    dcc.Input(id='new-crash-threshold', type='number', value=self.config['market_crash_halt']['threshold_pct'], className='border rounded px-2 py-1 w-32'),
+                    dcc.Input(id='new-crash-threshold', type='number', value=self.config['market_crash_halt']['threshold_pct'], className='border rounded px-2 py-1 w-32', min=0),
                     html.Label("Период наблюдения (мин):", className='font-medium'),
-                    dcc.Input(id='new-crash-lookback', type='number', value=self.config['market_crash_halt']['lookback_minutes'], className='border rounded px-2 py-1 w-32'),
-                    html.Label("Режим восстановления:", className='font-medium'),
-                    dcc.Dropdown(
-                        id='new-crash-recovery-mode',
-                        options=[
-                            {'label': 'Восстановление цены', 'value': 'price_recovery'},
-                            {'label': 'Стабильные бары', 'value': 'stable_bars'}
-                        ],
-                        value=self.config['market_crash_halt']['recovery_mode'],
-                        className='border rounded px-2 py-1 w-32'
-                    ),
+                    dcc.Input(id='new-crash-lookback', type='number', value=self.config['market_crash_halt']['lookback_minutes'], className='border rounded px-2 py-1 w-32', min=0),
                     html.Label("Порог восстановления (%):", className='font-medium'),
-                    dcc.Input(id='new-recovery-threshold', type='number', value=self.config['market_crash_halt']['recovery_threshold_pct'], className='border rounded px-2 py-1 w-32'),
-                    html.Label("Кол-во стабильных баров:", className='font-medium'),
-                    dcc.Input(id='new-stable-bars-count', type='number', value=self.config['market_crash_halt']['stable_bars_count'], className='border rounded px-2 py-1 w-32'),
-                    html.Label("Порог стабильности (%):", className='font-medium'),
-                    dcc.Input(id='new-stable-bar-threshold', type='number', value=self.config['market_crash_halt']['stable_bar_threshold_pct'], className='border rounded px-2 py-1 w-32'),
+                    dcc.Input(id='new-recovery-threshold', type='number', value=self.config['market_crash_halt']['recovery_threshold_pct'], className='border rounded px-2 py-1 w-32', min=0),
                     html.Label("Интервал:", className='font-medium'),
                     dcc.Dropdown(
                         id='new-interval-dropdown',
@@ -181,20 +167,16 @@ class SessionManagerDashboard:
              State('new-fee-input', 'value'), State('new-mae-enabled', 'value'),
              State('new-mae-threshold', 'value'), State('new-sl-pct', 'value'),
              State('new-crash-enabled', 'value'), State('new-crash-threshold', 'value'),
-             State('new-crash-lookback', 'value'), State('new-crash-recovery-mode', 'value'),
-             State('new-recovery-threshold', 'value'), State('new-stable-bars-count', 'value'),
-             State('new-stable-bar-threshold', 'value')]
+             State('new-crash-lookback', 'value'), State('new-recovery-threshold', 'value')]
         )
         def create_session(n_clicks, interval, balance, entry, exit_t, fee, mae_enabled, mae_threshold, sl_pct,
-                          crash_enabled, crash_threshold, crash_lookback, crash_recovery_mode,
-                          recovery_threshold, stable_bars_count, stable_bar_threshold):
+                          crash_enabled, crash_threshold, crash_lookback, recovery_threshold):
             if n_clicks > 0:
                 mae_enabled = 'enabled' in (mae_enabled or [])
                 crash_enabled = 'enabled' in (crash_enabled or [])
                 session_id = self.manager.start_simulation(
                     interval, balance, entry, exit_t, fee, mae_enabled, mae_threshold, sl_pct,
-                    crash_enabled, crash_threshold, crash_lookback, crash_recovery_mode,
-                    recovery_threshold, stable_bars_count, stable_bar_threshold
+                    crash_enabled, crash_threshold, crash_lookback, recovery_threshold
                 )
                 logger.info(f"Создана сессия {session_id} через форму. Экземпляр: {id(self.manager)}, simulations: {id(self.manager.simulations)}")
                 return 0
@@ -229,7 +211,6 @@ class SessionManagerDashboard:
                 if sim and sim.crash_paused:
                     sim.crash_paused = False
                     sim.auto_paused = False
-                    sim.stable_bars = 0
                     sim.lowest_price_after_crash = None
                     logger.info(f"Краш-пауза сброшена для сессии {session_id}")
                 return {'action': 'reset_crash', 'session_id': session_id}

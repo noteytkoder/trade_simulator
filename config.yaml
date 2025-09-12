@@ -43,9 +43,6 @@ ports:
     session_manager: 8462
 market_crash_halt:
   enabled: true
-  threshold_pct: -5.0
+  threshold_pct: 5.0
   lookback_minutes: 10
-  recovery_mode: "price_recovery"  # или "stable_bars"
   recovery_threshold_pct: 3.0
-  stable_bars_count: 10
-  stable_bar_threshold_pct: 1.0
