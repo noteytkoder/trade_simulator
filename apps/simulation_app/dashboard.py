@@ -54,13 +54,14 @@ class TradingDashboard:
                 html.P(id='session-entry', children="Порог входа: N/A", className='text-gray-700'),
                 html.P(id='session-exit', children="Порог выхода: N/A", className='text-gray-700'),
                 html.P(id='session-fee', children="Комиссия: N/A", className='text-gray-700'),
-                html.Hr(className='my-4'),  # Разделитель
+                html.Hr(className='my-4'),
                 html.P(id='session-price', children="Текущий курс BTCUSDT: 0.0", className='text-gray-700'),
                 html.P(id='session-btc', children="BTC: 0.0", className='text-gray-700'),
                 html.P(id='session-current-balance', children="Баланс: 0.0", className='text-gray-700'),
                 html.P(id='session-profit', children="Прибыль: 0.0", className='text-gray-700'),
                 html.P(id='session-accuracy', children="Точность прогнозов: 0.0%", className='text-gray-700'),
                 html.P(id='session-mae', children="MAE 10min: ...", className='text-gray-700'),
+                html.P(id='session-crash-paused', children="Краш-пауза: Нет", className='text-gray-700'),
             ]),
             html.Div(id='error-message', children="", className='text-red-500 mb-4'),
             dcc.Graph(id='balance-graph'),
@@ -68,6 +69,7 @@ class TradingDashboard:
             dcc.Graph(id='accuracy-graph'),
             dcc.Graph(id='mae-graph'),
             html.Button("Пауза/Возобновить", id='pause-button', className='bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600', disabled=True),
+            html.Button("Сбросить краш-паузу", id='reset-crash-button', className='bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 ml-2', disabled=True),
             dcc.Interval(id='interval-component', interval=2*1000, n_intervals=0)
         ])
 
@@ -85,11 +87,13 @@ class TradingDashboard:
                 Output('session-exit', 'children'),
                 Output('session-fee', 'children'),
                 Output('session-mae', 'children'),
+                Output('session-crash-paused', 'children'),
                 Output('balance-graph', 'figure'),
                 Output('profit-graph', 'figure'),
                 Output('accuracy-graph', 'figure'),
                 Output('mae-graph', 'figure'),
                 Output('pause-button', 'disabled'),
+                Output('reset-crash-button', 'disabled'),
                 Output('error-message', 'children')
             ],
             [Input('interval-component', 'n_intervals'), Input('url', 'search')]
@@ -114,10 +118,12 @@ class TradingDashboard:
                     "Порог выхода: N/A",
                     "Комиссия: N/A",
                     "MAE 10min: ...",
+                    "Краш-пауза: Нет",
                     {'data': [], 'layout': {'title': 'Нет данных', 'uirevision': 'constant'}},
                     {'data': [], 'layout': {'title': 'Нет данных', 'uirevision': 'constant'}},
                     {'data': [], 'layout': {'title': 'Нет данных', 'uirevision': 'constant'}},
                     {'data': [], 'layout': {'title': 'Нет данных', 'uirevision': 'constant'}},
+                    True,
                     True,
                     "Выберите сессию"
                 )
@@ -138,10 +144,12 @@ class TradingDashboard:
                     "Порог выхода: N/A",
                     "Комиссия: N/A",
                     "MAE 10min: ...",
+                    "Краш-пауза: Нет",
                     {'data': [], 'layout': {'title': f'Сессия {session_id} не найдена', 'uirevision': 'constant'}},
                     {'data': [], 'layout': {'title': f'Сессия {session_id} не найдена', 'uirevision': 'constant'}},
                     {'data': [], 'layout': {'title': f'Сессия {session_id} не найдена', 'uirevision': 'constant'}},
                     {'data': [], 'layout': {'title': f'Сессия {session_id} не найдена', 'uirevision': 'constant'}},
+                    True,
                     True,
                     "Сессия не найдена в памяти"
                 )
@@ -173,7 +181,7 @@ class TradingDashboard:
                     'yaxis': {'title': 'Баланс', 'autorange': True},
                     'height': 400,
                     'margin': {'t': 50},
-                    'uirevision': 'constant'  # Сохраняет пользовательский зум и положение
+                    'uirevision': 'constant'
                 }
             }
 
@@ -197,7 +205,7 @@ class TradingDashboard:
                     'yaxis': {'title': 'Прибыль', 'autorange': True},
                     'height': 300,
                     'margin': {'t': 50},
-                    'uirevision': 'constant'  # Сохраняет пользовательский зум и положение
+                    'uirevision': 'constant'
                 }
             }
 
@@ -222,7 +230,7 @@ class TradingDashboard:
                     'yaxis': {'title': 'Точность (%)', 'autorange': True},
                     'height': 300,
                     'margin': {'t': 50},
-                    'uirevision': 'constant'  # Сохраняет пользовательский зум и положение
+                    'uirevision': 'constant'
                 }
             }
 
@@ -247,7 +255,7 @@ class TradingDashboard:
                     'yaxis': {'title': 'MAE', 'autorange': True},
                     'height': 300,
                     'margin': {'t': 50},
-                    'uirevision': 'constant'  # Сохраняет пользовательский зум и положение
+                    'uirevision': 'constant'
                 }
             }
 
@@ -263,11 +271,13 @@ class TradingDashboard:
                 f"Порог выхода: {sim.exit_threshold:.6f}%",
                 f"Комиссия: {sim.fee_pct:.6f}%",
                 f"MAE 10min: {sim.get_last_mae():.4f}" if sim.get_last_mae() is not None else "MAE 10min: ...",
+                f"Краш-пауза: {'Да' if sim.crash_paused else 'Нет'}",
                 balance_fig,
                 profit_fig,
                 accuracy_fig,
                 mae_fig,
                 False,
+                not sim.crash_paused,
                 ""
             )
 
@@ -287,6 +297,28 @@ class TradingDashboard:
                 current_paused = sess_data.get('paused', False)
                 self.manager.pause_simulation(interval, session_id, not current_paused)
                 return "Возобновить" if current_paused else "Пауза"
+            return current_label
+
+        @self.app.callback(
+            Output('reset-crash-button', 'children'),
+            [Input('reset-crash-button', 'n_clicks'), Input('url', 'search')],
+            [State('reset-crash-button', 'children')]
+        )
+        def reset_crash_pause(n_clicks, search, current_label):
+            if n_clicks is None or n_clicks == 0:
+                return current_label
+            query_params = parse_qs(search.lstrip('?'))
+            session_id = query_params.get('session_id', [None])[0]
+            if session_id:
+                interval = session_id.split('_')[0]
+                sim = self.manager.get_simulator(interval, session_id)
+                if sim and sim.crash_paused:
+                    sim.crash_paused = False
+                    sim.auto_paused = False
+                    sim.stable_bars = 0
+                    sim.lowest_price_after_crash = None
+                    logger.info(f"Краш-пауза сброшена для сессии {session_id} через дашборд")
+                return "Сбросить краш-паузу"
             return current_label
 
     def run(self):

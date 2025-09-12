@@ -16,7 +16,6 @@ class SessionManagerDashboard:
         self.env = self.config.get('env', 'prod')
         self.simulation_port = self.config['ports'][self.env]['simulation']
         self.manager = SimulationManager()
-        # logger.info(f"SessionManager использует SimulationManager, экземпляр: {id(self.manager)}, simulations: {id(self.manager.simulations)}")
         logger.setLevel(getattr(logging, self.config.get('log_level', 'INFO')))
         self.app = Dash(__name__, external_stylesheets=[
             'https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css'
@@ -55,13 +54,35 @@ class SessionManagerDashboard:
                     dcc.Input(id='new-mae-threshold', type='number', value=self.config['mae_stop_threshold'], className='border rounded px-2 py-1 w-32'),
                     html.Label("Стоп-лосс %:", className='font-medium'),
                     dcc.Input(id='new-sl-pct', type='number', value=self.config['stop_loss_pct'], className='border rounded px-2 py-1 w-32'),
+                    html.Label("Краш-пауза:", className='font-medium'),
+                    dcc.Checklist(id='new-crash-enabled', options=[{'label': '', 'value': 'enabled'}], value=['enabled'] if self.config['market_crash_halt']['enabled'] else [], className='border rounded px-2 py-1'),
+                    html.Label("Порог падения (%):", className='font-medium'),
+                    dcc.Input(id='new-crash-threshold', type='number', value=self.config['market_crash_halt']['threshold_pct'], className='border rounded px-2 py-1 w-32'),
+                    html.Label("Период наблюдения (мин):", className='font-medium'),
+                    dcc.Input(id='new-crash-lookback', type='number', value=self.config['market_crash_halt']['lookback_minutes'], className='border rounded px-2 py-1 w-32'),
+                    html.Label("Режим восстановления:", className='font-medium'),
+                    dcc.Dropdown(
+                        id='new-crash-recovery-mode',
+                        options=[
+                            {'label': 'Восстановление цены', 'value': 'price_recovery'},
+                            {'label': 'Стабильные бары', 'value': 'stable_bars'}
+                        ],
+                        value=self.config['market_crash_halt']['recovery_mode'],
+                        className='border rounded px-2 py-1 w-32'
+                    ),
+                    html.Label("Порог восстановления (%):", className='font-medium'),
+                    dcc.Input(id='new-recovery-threshold', type='number', value=self.config['market_crash_halt']['recovery_threshold_pct'], className='border rounded px-2 py-1 w-32'),
+                    html.Label("Кол-во стабильных баров:", className='font-medium'),
+                    dcc.Input(id='new-stable-bars-count', type='number', value=self.config['market_crash_halt']['stable_bars_count'], className='border rounded px-2 py-1 w-32'),
+                    html.Label("Порог стабильности (%):", className='font-medium'),
+                    dcc.Input(id='new-stable-bar-threshold', type='number', value=self.config['market_crash_halt']['stable_bar_threshold_pct'], className='border rounded px-2 py-1 w-32'),
                     html.Label("Интервал:", className='font-medium'),
                     dcc.Dropdown(
                         id='new-interval-dropdown',
                         options=[
                             {'label': '5 секунд', 'value': '5s'},
                             {'label': '1 минута', 'value': '1m'},
-                            {'label': '1 час', 'value': '1h'}  # Добавлено
+                            {'label': '1 час', 'value': '1h'}
                         ],
                         value='5s',
                         className='border rounded px-2 py-1 w-32'
@@ -81,10 +102,8 @@ class SessionManagerDashboard:
             [Input('interval-component', 'n_intervals')]
         )
         def update_sessions_table(n_intervals):
-            # ip = "185.5.248.212"
             ip = "127.0.0.1"
             sessions = self.manager.list_sessions()
-            # logger.info(f"Обновление таблицы сессий: найдено {len(sessions)} сессий. Экземпляр: {id(self.manager)}, simulations: {id(self.manager.simulations)}")
             data = [
                 {
                     'interval': s['interval'],
@@ -96,6 +115,7 @@ class SessionManagerDashboard:
                     'running': 'Запущена' if s['running'] else 'Остановлена',
                     'paused': 'На паузе' if s['paused'] else 'Активна',
                     'auto_paused': 'Да' if s['auto_paused'] else 'Нет',
+                    'crash_paused': 'Да' if s['crash_paused'] else 'Нет',
                     'start_time': s['start_time'],
                     'entry_threshold': f"{s['entry_threshold']:.6f}%",
                     'exit_threshold': f"{s['exit_threshold']:.6f}%",
@@ -103,11 +123,13 @@ class SessionManagerDashboard:
                     'mae_stop_enabled': 'Да' if s['mae_stop_enabled'] else 'Нет',
                     'mae_stop_threshold': f"{s['mae_stop_threshold']:.6f}",
                     'stop_loss_pct': f"{s['stop_loss_pct']:.6f}%",
+                    'crash_halt_enabled': 'Да' if s['crash_halt_enabled'] else 'Нет',
                     'last_mae': f"{s['last_mae']:.4f}" if s['last_mae'] is not None else "...",
                     'view_dashboard': f"[Открыть дашборд](http://{ip}:{self.simulation_port}?session_id={s['session_id']})",
                     'view_log': f"[Открыть лог](http://{ip}:{self.config['ports'][self.env]['logs']}/logs/simulation_{s['session_id']}.csv)",
                     'stop_action': '[Остановить]' if s['running'] else '—',
-                    'pause_action': '[Пауза]' if s['running'] and not s['paused'] else '[Возобновить]' if s['running'] and s['paused'] else '—'
+                    'pause_action': '[Пауза]' if s['running'] and not s['paused'] else '[Возобновить]' if s['running'] and s['paused'] else '—',
+                    'reset_crash_action': '[Сбросить краш]' if s['crash_paused'] else '—'
                 } for s in sessions
             ]
             table = dash_table.DataTable(
@@ -122,18 +144,12 @@ class SessionManagerDashboard:
                     {'name': 'Статус', 'id': 'running'},
                     {'name': 'Пауза', 'id': 'paused'},
                     {'name': 'Авто-пауза', 'id': 'auto_paused'},
-                    # {'name': 'Время старта', 'id': 'start_time'},
-                    # {'name': 'Порог входа', 'id': 'entry_threshold'},
-                    # {'name': 'Порог выхода', 'id': 'exit_threshold'},
-                    # {'name': 'Комиссия', 'id': 'fee_pct'},
-                    # {'name': 'MAE стоп', 'id': 'mae_stop_enabled'},
-                    # {'name': 'MAE порог', 'id': 'mae_stop_threshold'},
-                    # {'name': 'Стоп-лосс %', 'id': 'stop_loss_pct'},
-                    # {'name': 'Последний MAE', 'id': 'last_mae'},
+                    {'name': 'Краш-пауза', 'id': 'crash_paused'},
                     {'name': 'Дашборд', 'id': 'view_dashboard', 'type': 'text', 'presentation': 'markdown'},
                     {'name': 'Лог', 'id': 'view_log', 'type': 'text', 'presentation': 'markdown'},
                     {'name': 'Стоп', 'id': 'stop_action', 'type': 'text', 'presentation': 'markdown'},
-                    {'name': 'Пауза', 'id': 'pause_action', 'type': 'text', 'presentation': 'markdown'}
+                    {'name': 'Пауза', 'id': 'pause_action', 'type': 'text', 'presentation': 'markdown'},
+                    {'name': 'Сброс краша', 'id': 'reset_crash_action', 'type': 'text', 'presentation': 'markdown'}
                 ],
                 data=data,
                 style_table={'overflowX': 'auto'},
@@ -147,6 +163,10 @@ class SessionManagerDashboard:
                     {
                         'if': {'column_id': 'pause_action'},
                         'backgroundColor': 'blue', 'color': 'white', 'cursor': 'pointer', 'textAlign': 'center', 'fontWeight': 'bold'
+                    },
+                    {
+                        'if': {'column_id': 'reset_crash_action'},
+                        'backgroundColor': 'green', 'color': 'white', 'cursor': 'pointer', 'textAlign': 'center', 'fontWeight': 'bold'
                     }
                 ],
                 sort_action='native'
@@ -159,12 +179,23 @@ class SessionManagerDashboard:
             [State('new-interval-dropdown', 'value'), State('new-balance-input', 'value'),
              State('new-entry-threshold-input', 'value'), State('new-exit-threshold-input', 'value'),
              State('new-fee-input', 'value'), State('new-mae-enabled', 'value'),
-             State('new-mae-threshold', 'value'), State('new-sl-pct', 'value')]
+             State('new-mae-threshold', 'value'), State('new-sl-pct', 'value'),
+             State('new-crash-enabled', 'value'), State('new-crash-threshold', 'value'),
+             State('new-crash-lookback', 'value'), State('new-crash-recovery-mode', 'value'),
+             State('new-recovery-threshold', 'value'), State('new-stable-bars-count', 'value'),
+             State('new-stable-bar-threshold', 'value')]
         )
-        def create_session(n_clicks, interval, balance, entry, exit_t, fee, mae_enabled, mae_threshold, sl_pct):
+        def create_session(n_clicks, interval, balance, entry, exit_t, fee, mae_enabled, mae_threshold, sl_pct,
+                          crash_enabled, crash_threshold, crash_lookback, crash_recovery_mode,
+                          recovery_threshold, stable_bars_count, stable_bar_threshold):
             if n_clicks > 0:
                 mae_enabled = 'enabled' in (mae_enabled or [])
-                session_id = self.manager.start_simulation(interval, balance, entry, exit_t, fee, mae_enabled, mae_threshold, sl_pct)
+                crash_enabled = 'enabled' in (crash_enabled or [])
+                session_id = self.manager.start_simulation(
+                    interval, balance, entry, exit_t, fee, mae_enabled, mae_threshold, sl_pct,
+                    crash_enabled, crash_threshold, crash_lookback, crash_recovery_mode,
+                    recovery_threshold, stable_bars_count, stable_bar_threshold
+                )
                 logger.info(f"Создана сессия {session_id} через форму. Экземпляр: {id(self.manager)}, simulations: {id(self.manager.simulations)}")
                 return 0
             return n_clicks
@@ -192,6 +223,16 @@ class SessionManagerDashboard:
                 self.manager.pause_simulation(interval, session_id, not current_paused)
                 logger.info(f"Сессия {session_id} {'приостановлена' if not current_paused else 'возобновлена'} через таблицу. Экземпляр: {id(self.manager)}, simulations: {id(self.manager.simulations)}")
                 return {'action': 'pause', 'session_id': session_id}
+            elif col == 'reset_crash_action':
+                interval = session_id.split('_')[0]
+                sim = self.manager.get_simulator(interval, session_id)
+                if sim and sim.crash_paused:
+                    sim.crash_paused = False
+                    sim.auto_paused = False
+                    sim.stable_bars = 0
+                    sim.lowest_price_after_crash = None
+                    logger.info(f"Краш-пауза сброшена для сессии {session_id}")
+                return {'action': 'reset_crash', 'session_id': session_id}
             return None
 
     def run(self):

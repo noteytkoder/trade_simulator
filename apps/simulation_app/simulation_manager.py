@@ -27,23 +27,49 @@ class SimulationManager:
         self.mae_stop_enabled = self.config.get('mae_stop_enabled', True)
         self.mae_stop_threshold = self.config.get('mae_stop_threshold', 12.0)
         self.stop_loss_pct = self.config.get('stop_loss_pct', 0.01)
+        self.crash_halt_enabled = self.config['market_crash_halt'].get('enabled', False)
+        self.crash_threshold_pct = self.config['market_crash_halt'].get('threshold_pct', -5.0)
+        self.crash_lookback_minutes = self.config['market_crash_halt'].get('lookback_minutes', 10)
+        self.crash_recovery_mode = self.config['market_crash_halt'].get('recovery_mode', 'price_recovery')
+        self.recovery_threshold_pct = self.config['market_crash_halt'].get('recovery_threshold_pct', 3.0)
+        self.stable_bars_count = self.config['market_crash_halt'].get('stable_bars_count', 10)
+        self.stable_bar_threshold_pct = self.config['market_crash_halt'].get('stable_bar_threshold_pct', 1.0)
         self.simulations = {}
         self.current_price = None
         self.lock = threading.Lock()
         logger.info(f"Singleton SimulationManager создан, экземпляр адрес: {id(self)}, simulations адрес: {id(self.simulations)}")
 
     def start_simulation(self, interval, balance, entry_threshold, exit_threshold, fee,
-                        mae_stop_enabled=None, mae_stop_threshold=None, stop_loss_pct=None) -> str:
+                        mae_stop_enabled=None, mae_stop_threshold=None, stop_loss_pct=None,
+                        crash_halt_enabled=None, crash_threshold_pct=None, crash_lookback_minutes=None,
+                        crash_recovery_mode=None, recovery_threshold_pct=None,
+                        stable_bars_count=None, stable_bar_threshold_pct=None) -> str:
         session_id = f"{interval}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         mae_stop_enabled = mae_stop_enabled if mae_stop_enabled is not None else self.mae_stop_enabled
         mae_stop_threshold = mae_stop_threshold if mae_stop_threshold is not None else self.mae_stop_threshold
         stop_loss_pct = stop_loss_pct if stop_loss_pct is not None else self.stop_loss_pct
+        crash_halt_enabled = crash_halt_enabled if crash_halt_enabled is not None else self.crash_halt_enabled
+        crash_threshold_pct = crash_threshold_pct if crash_threshold_pct is not None else self.crash_threshold_pct
+        crash_lookback_minutes = crash_lookback_minutes if crash_lookback_minutes is not None else self.crash_lookback_minutes
+        crash_recovery_mode = crash_recovery_mode if crash_recovery_mode is not None else self.crash_recovery_mode
+        recovery_threshold_pct = recovery_threshold_pct if recovery_threshold_pct is not None else self.recovery_threshold_pct
+        stable_bars_count = stable_bars_count if stable_bars_count is not None else self.stable_bars_count
+        stable_bar_threshold_pct = stable_bar_threshold_pct if stable_bar_threshold_pct is not None else self.stable_bar_threshold_pct
         with self.lock:
             logger.debug(f"Начало создания сессии {session_id} для {interval}. Экземпляр: {id(self)}, simulations: {id(self.simulations)}")
             if interval not in self.simulations:
                 self.simulations[interval] = {}
-            sim = TradeSimulator(balance, entry_threshold, exit_threshold, fee, interval, session_id,
-                                 mae_stop_enabled, mae_stop_threshold, stop_loss_pct)
+            sim = TradeSimulator(
+                balance, entry_threshold, exit_threshold, fee, interval, session_id,
+                mae_stop_enabled, mae_stop_threshold, stop_loss_pct,
+                crash_halt_enabled=crash_halt_enabled,
+                crash_threshold_pct=crash_threshold_pct,
+                crash_lookback_minutes=crash_lookback_minutes,
+                crash_recovery_mode=crash_recovery_mode,
+                recovery_threshold_pct=recovery_threshold_pct,
+                stable_bars_count=stable_bars_count,
+                stable_bar_threshold_pct=stable_bar_threshold_pct
+            )
             thread = threading.Thread(target=self._run_loop, args=(sim, session_id), daemon=True)
             self.simulations[interval][session_id] = {
                 "thread": thread,
@@ -118,11 +144,7 @@ class SimulationManager:
 
     def get_simulator(self, interval, session_id):
         with self.lock:
-            sim = self.simulations.get(interval, {}).get(session_id, {}).get("sim")
-            # if sim:
-            #     logger.info(f"Сессия {session_id} подгружена из памяти для {interval}. Параметры: {sim.metadata}. Экземпляр: {id(self)}, simulations: {id(self.simulations)}, содержание: {self.simulations.get(interval, 'пусто')}")
-            # else:
-            #     logger.warning(f"Сессия {session_id} не найдена в памяти для {interval}. Экземпляр: {id(self)}, simulations: {id(self.simulations)}, содержание: {self.simulations.get(interval, 'пусто')}")
+            sim = self.simulations.get(interval, {}).get("sim")
             return sim
 
     def list_sessions(self) -> List[Dict]:
@@ -140,6 +162,8 @@ class SimulationManager:
                         "accuracy": sim.get_prediction_accuracy(),
                         "running": data["running"],
                         "paused": data["paused"],
+                        "auto_paused": sim.auto_paused,
+                        "crash_paused": sim.crash_paused,
                         "start_time": sim.start_time,
                         "entry_threshold": sim.entry_threshold,
                         "exit_threshold": sim.exit_threshold,
@@ -147,10 +171,9 @@ class SimulationManager:
                         "mae_stop_enabled": sim.mae_stop_enabled,
                         "mae_stop_threshold": sim.mae_stop_threshold,
                         "stop_loss_pct": sim.stop_loss_pct,
-                        "auto_paused": sim.auto_paused,
+                        "crash_halt_enabled": sim.crash_halt_enabled,
                         "last_mae": sim.get_last_mae()
                     })
-            # logger.info(f"Список сессий возвращён: {len(sessions)} активных сессий. Экземпляр: {id(self)}, simulations: {id(self.simulations)}, хранение: {self.simulations.keys()}")
         return sessions
 
     def get_current_price(self):

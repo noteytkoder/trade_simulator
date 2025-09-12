@@ -21,12 +21,19 @@ class TradeSimulator:
                  session_id: str,
                  mae_stop_enabled: bool = False,
                  mae_stop_threshold: float = 12.0,
-                 stop_loss_pct: float = 1.0,          # проценты (1.0 = 1%)
-                 trailing_stop_pct: float = 0.0,       # проценты (0.5 = 0.5%)
+                 stop_loss_pct: float = 1.0,
+                 trailing_stop_pct: float = 0.0,
                  max_hold_minutes: int = 1,
                  max_hold_seconds: int = 5,
                  cooldown_seconds: Optional[int] = None,
-                 prediction_valid_seconds: Optional[int] = None):
+                 prediction_valid_seconds: Optional[int] = None,
+                 crash_halt_enabled: bool = False,
+                 crash_threshold_pct: float = -5.0,
+                 crash_lookback_minutes: int = 10,
+                 crash_recovery_mode: str = "price_recovery",
+                 recovery_threshold_pct: float = 3.0,
+                 stable_bars_count: int = 10,
+                 stable_bar_threshold_pct: float = 1.0):
 
         self.balance = start_balance
         self.btc = 0.0
@@ -65,7 +72,14 @@ class TradeSimulator:
             'stop_loss_pct': self.stop_loss_pct,
             'trailing_stop_pct': self.trailing_stop_pct,
             'max_hold_minutes': max_hold_minutes,
-            'max_hold_seconds': max_hold_seconds
+            'max_hold_seconds': max_hold_seconds,
+            'crash_halt_enabled': crash_halt_enabled,
+            'crash_threshold_pct': crash_threshold_pct,
+            'crash_lookback_minutes': crash_lookback_minutes,
+            'crash_recovery_mode': crash_recovery_mode,
+            'recovery_threshold_pct': recovery_threshold_pct,
+            'stable_bars_count': stable_bars_count,
+            'stable_bar_threshold_pct': stable_bar_threshold_pct
         }
         self.correct_predictions = 0
         self.total_predictions = 0
@@ -74,26 +88,29 @@ class TradeSimulator:
         self.entry_time = None
         self.max_hold_minutes = max_hold_minutes
         self.max_hold_seconds = max_hold_seconds
+        self.crash_halt_enabled = crash_halt_enabled
+        self.crash_threshold_pct = crash_threshold_pct
+        self.crash_lookback_minutes = crash_lookback_minutes
+        self.crash_recovery_mode = crash_recovery_mode
+        self.recovery_threshold_pct = recovery_threshold_pct
+        self.stable_bars_count = stable_bars_count
+        self.stable_bar_threshold_pct = stable_bar_threshold_pct
+        self.crash_paused = False
+        self.price_history = []
+        self.lowest_price_after_crash = None
+        self.stable_bars = 0
 
-        # max_hold на основе interval
         if self.interval == '5s':
             self.max_hold = timedelta(seconds=self.max_hold_seconds)
         elif self.interval == '1m':
             self.max_hold = timedelta(minutes=self.max_hold_minutes)
         elif self.interval == '1h':
-            self.max_hold = timedelta(hours=1)  # Пример, можно настроить в конфиге
+            self.max_hold = timedelta(hours=1)
         else:
             raise ValueError(f"Неподдерживаемый интервал: {self.interval}")
 
-        # prediction / realtime helpers
-        self.last_prediction: Optional[Dict] = None
-        self.peak_price: Optional[float] = None
-        self.cooldown_until: Optional[datetime] = None
-
-        # sensible defaults if не заданы
-        default_cooldown = {'5s': 2, '1m': 30, '1h': 1800}  # 30 мин для часа, пример
-        default_pred_valid = {'5s': 10, '1m': 120, '1h': 7200}  # 2 часа для часа, пример
-
+        default_cooldown = {'5s': 2, '1m': 30, '1h': 1800}
+        default_pred_valid = {'5s': 10, '1m': 120, '1h': 7200}
         self.cooldown_seconds = cooldown_seconds if cooldown_seconds is not None else default_cooldown.get(interval, 30)
         self.prediction_valid_seconds = prediction_valid_seconds if prediction_valid_seconds is not None else default_pred_valid.get(interval, 120)
 
@@ -104,7 +121,14 @@ class TradeSimulator:
             f"MAE стоп={self.mae_stop_enabled}, MAE порог={self.mae_stop_threshold}, "
             f"стоп-лосс={self.stop_loss_pct:.3f}%, trailing={self.trailing_stop_pct:.3f}%, "
             f"max_hold={self.max_hold}, "
-            f"cooldown={self.cooldown_seconds}s, pred_valid={self.prediction_valid_seconds}s"
+            f"cooldown={self.cooldown_seconds}s, pred_valid={self.prediction_valid_seconds}s, "
+            f"crash_halt_enabled={self.crash_halt_enabled}, "
+            f"crash_threshold={self.crash_threshold_pct}%, "
+            f"crash_lookback={self.crash_lookback_minutes}min, "
+            f"recovery_mode={self.crash_recovery_mode}, "
+            f"recovery_threshold={self.recovery_threshold_pct}%, "
+            f"stable_bars_count={self.stable_bars_count}, "
+            f"stable_bar_threshold={self.stable_bar_threshold_pct}%"
         )
 
     def calculate_fee(self, amount: float) -> float:
@@ -149,6 +173,55 @@ class TradeSimulator:
                 self.sell(tick['timestamp'], trade_price, None, None, reason="Стоп-лосс")
                 self.auto_paused = False
 
+    def check_market_crash(self, tick: Dict) -> bool:
+        if not self.crash_halt_enabled or self.crash_paused:
+            return False
+        now = datetime.now(ZoneInfo("Europe/Moscow"))
+        trade_price = float(tick.get('realtime_price', tick.get('actual_price')))
+        self.price_history.append((now, trade_price))
+        cutoff = now - timedelta(minutes=self.crash_lookback_minutes)
+        self.price_history = [p for p in self.price_history if p[0] > cutoff]
+        
+        if len(self.price_history) < 2:
+            return False
+        
+        prices = [p[1] for p in self.price_history]
+        max_price = max(prices)
+        drop_pct = (trade_price - max_price) / max_price * 100
+        if drop_pct <= self.crash_threshold_pct:
+            logger.warning(f"Обнаружено падение рынка: {drop_pct:.2f}% за {self.crash_lookback_minutes}мин")
+            self.lowest_price_after_crash = trade_price
+            return True
+        return False
+
+    def check_recovery(self, tick: Dict) -> bool:
+        if not self.crash_paused:
+            return False
+        trade_price = float(tick.get('realtime_price', tick.get('actual_price')))
+        
+        if self.crash_recovery_mode == "price_recovery":
+            if self.lowest_price_after_crash is None:
+                self.lowest_price_after_crash = trade_price
+                return False
+            recovery_pct = (trade_price - self.lowest_price_after_crash) / self.lowest_price_after_crash * 100
+            if recovery_pct >= self.recovery_threshold_pct:
+                logger.info(f"Восстановление рынка: цена выросла на {recovery_pct:.2f}% от минимума")
+                return True
+        elif self.crash_recovery_mode == "stable_bars":
+            if len(self.price_history) < 2:
+                return False
+            last_price = self.price_history[-2][1]
+            change_pct = abs((trade_price - last_price) / last_price * 100)
+            if change_pct <= self.stable_bar_threshold_pct:
+                self.stable_bars += 1
+                if self.stable_bars >= self.stable_bars_count:
+                    logger.info(f"Восстановление рынка: {self.stable_bars} стабильных баров")
+                    return True
+            else:
+                self.stable_bars = 0
+                logger.debug(f"Сброс стабильных баров: изменение {change_pct:.2f}% > {self.stable_bar_threshold_pct}%")
+        return False
+
     def process_tick(self, tick: Dict):
         timestamp = tick['timestamp']
         trade_price = float(tick.get('realtime_price', tick.get('actual_price')))
@@ -156,14 +229,28 @@ class TradeSimulator:
         self.last_mae = tick.get('mae_10min', 0)
         self.mae_series.append((timestamp, self.last_mae))
 
+        if self.crash_halt_enabled and self.check_market_crash(tick):
+            if self.btc > 0:
+                self.sell(timestamp, trade_price, None, None, reason="Market crash halt")
+            self.crash_paused = True
+            self.auto_paused = True
+            logger.info(f"Сессия на паузе из-за падения рынка: {trade_price:.4f}")
+
+        if self.crash_paused and self.check_recovery(tick):
+            self.crash_paused = False
+            self.auto_paused = False
+            self.stable_bars = 0
+            self.lowest_price_after_crash = None
+            logger.info(f"Сессия возобновлена: рынок восстановился")
+
         if self.mae_stop_enabled and self.last_mae > self.mae_stop_threshold:
             self.auto_paused = True
         else:
-            self.auto_paused = False
+            self.auto_paused = self.crash_paused
 
         if self.auto_paused:
             if self.btc > 0:
-                self.sell(timestamp, trade_price, None, None, reason="Авто-пауза: высокая MAE")
+                self.sell(timestamp, trade_price, None, None, reason="Авто-пауза: высокая MAE или краш")
             self.last_tick = tick
             return
 
