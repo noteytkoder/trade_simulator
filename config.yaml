@@ -19,7 +19,7 @@ ui:
   default_interval: 5s
   logs_interval: 5s
   logs_page_size: 100
-env: dev3
+env: dev4
 ports:
   prod:
     simulation: 8060
@@ -37,6 +37,10 @@ ports:
     simulation: 8360
     logs: 8361
     session_manager: 8362
+  dev4:
+    simulation: 8460
+    logs: 8461
+    session_manager: 8462
 market_crash_halt:
   enabled: true
   threshold_pct: -5.0
