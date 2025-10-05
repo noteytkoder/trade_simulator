@@ -2,7 +2,7 @@ auth:
   password: qwerty63
   username: admin
 endpoints:
-  five_sec: http://185.5.248.212:8252/logs/predictions_dev2.table
+  five_sec: http://185.5.248.212:8452/logs/predictions.table
   minute_hour: http://185.5.248.212:8150/logs/predictions_dev.table
 entry_threshold: 0.001
 exit_threshold: 0.001
@@ -41,6 +41,10 @@ ports:
     simulation: 8460
     logs: 8461
     session_manager: 8462
+  dev4:
+    simulation: 8560
+    logs: 8561
+    session_manager: 8562
 market_crash_halt:
   enabled: true
   threshold_pct: 5.0
